@@ -70,19 +70,20 @@ func (d *Document) findMemberDefinition(typeName, member string, classes map[str
 		return nil
 	}
 
+	uri := d.classURI(cls)
 	for _, f := range cls.Fields {
 		if f.Name == member && f.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
+			return &DefinitionResult{URI: uri, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
 		}
 	}
 	for _, m := range cls.Methods {
 		if m.Name == member && m.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
+			return &DefinitionResult{URI: uri, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
 		}
 	}
 	for _, p := range cls.Properties {
 		if p.Name == member && p.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
+			return &DefinitionResult{URI: uri, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
 		}
 	}
 
@@ -95,12 +96,13 @@ func (d *Document) findMemberDefinition(typeName, member string, classes map[str
 func (d *Document) definitionBare(name string, line int) *DefinitionResult {
 	classes := d.GetClasses()
 
-	// Check if it's a class name
+	// Check if it's a class name (current file first)
 	if classes != nil {
 		for fullName, cls := range classes {
 			if fullName == name || cls.Name == name {
 				if cls.Pos.Line > 0 {
-					return &DefinitionResult{URI: d.URI, Line: cls.Pos.Line, Col: cls.Pos.Col, EndCol: cls.Pos.EndCol}
+					uri := d.classURI(cls)
+					return &DefinitionResult{URI: uri, Line: cls.Pos.Line, Col: cls.Pos.Col, EndCol: cls.Pos.EndCol}
 				}
 			}
 		}
@@ -108,7 +110,8 @@ func (d *Document) definitionBare(name string, line int) *DefinitionResult {
 		for fullName, cls := range classes {
 			if strings.HasSuffix(fullName, "_"+name) {
 				if cls.Pos.Line > 0 {
-					return &DefinitionResult{URI: d.URI, Line: cls.Pos.Line, Col: cls.Pos.Col, EndCol: cls.Pos.EndCol}
+					uri := d.classURI(cls)
+					return &DefinitionResult{URI: uri, Line: cls.Pos.Line, Col: cls.Pos.Col, EndCol: cls.Pos.EndCol}
 				}
 			}
 		}
@@ -153,4 +156,35 @@ func (d *Document) definitionBare(name string, line int) *DefinitionResult {
 	}
 
 	return nil
+}
+
+// classURI returns the file URI where a class is defined.
+// Checks the current document first, then sibling files.
+func (d *Document) classURI(cls *parser.ClassDecl) string {
+	// Check if it's in the current file
+	if d.AST != nil {
+		if classInFile(cls, d.AST.Classes) {
+			return d.URI
+		}
+	}
+	// Check sibling files
+	for uri, file := range d.SiblingFiles {
+		if classInFile(cls, file.Classes) {
+			return uri
+		}
+	}
+	return d.URI
+}
+
+// classInFile checks if a ClassDecl pointer exists in a list of classes (by identity).
+func classInFile(target *parser.ClassDecl, classes []*parser.ClassDecl) bool {
+	for _, cls := range classes {
+		if cls == target {
+			return true
+		}
+		if classInFile(target, cls.Classes) {
+			return true
+		}
+	}
+	return false
 }

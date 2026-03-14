@@ -181,9 +181,10 @@ type SignatureHelpParams struct {
 // --- Server state ---
 
 var (
-	docs   = map[string]*analysis.Document{}
-	writer *bufio.Writer
-	logger *log.Logger
+	docs     = map[string]*analysis.Document{}
+	rootPath string // workspace root from initialize
+	writer   *bufio.Writer
+	logger   *log.Logger
 )
 
 func main() {
@@ -324,6 +325,13 @@ func handleMessage(msg *jsonrpcMessage) {
 }
 
 func handleInitialize(msg *jsonrpcMessage) {
+	var params InitializeParams
+	json.Unmarshal(msg.Params, &params)
+	if params.RootURI != "" {
+		rootPath = uriToPath(params.RootURI)
+		logger.Printf("initialize: rootPath=%s", rootPath)
+	}
+
 	result := InitializeResult{
 		Capabilities: ServerCapabilities{
 			TextDocumentSync: 1, // Full
@@ -346,7 +354,7 @@ func handleDidOpen(msg *jsonrpcMessage) {
 
 	uri := params.TextDocument.URI
 	logger.Printf("didOpen: uri=%s path=%s len=%d", uri, uriToPath(uri), len(params.TextDocument.Text))
-	doc := analysis.Analyze(uriToPath(uri), []byte(params.TextDocument.Text))
+	doc := analyzeWithSiblings(uri, []byte(params.TextDocument.Text))
 	logger.Printf("didOpen: tokens=%d classes=%d diags=%d ast=%v", len(doc.Tokens), len(doc.GetClasses()), len(doc.Diags), doc.AST != nil)
 	docs[uri] = doc
 	publishDiagnostics(uri, doc)
@@ -361,7 +369,7 @@ func handleDidChange(msg *jsonrpcMessage) {
 		return
 	}
 	text := params.ContentChanges[len(params.ContentChanges)-1].Text
-	doc := analysis.Analyze(uriToPath(uri), []byte(text))
+	doc := analyzeWithSiblings(uri, []byte(text))
 	docs[uri] = doc
 	publishDiagnostics(uri, doc)
 }
@@ -466,8 +474,14 @@ func handleDefinition(msg *jsonrpcMessage) {
 		return
 	}
 
+	// Use the URI from the definition result (may be a different file)
+	defURI := params.TextDocument.URI
+	if result.URI != "" {
+		defURI = result.URI
+	}
+
 	loc := Location{
-		URI: params.TextDocument.URI,
+		URI: defURI,
 		Range: Range{
 			Start: Position{Line: result.Line - 1, Character: result.Col - 1},
 			End:   Position{Line: result.Line - 1, Character: result.EndCol - 1},
@@ -519,6 +533,89 @@ func handleSignatureHelp(msg *jsonrpcMessage) {
 		ActiveSignature: 0,
 		ActiveParameter: result.ActiveParameter,
 	})
+}
+
+// analyzeWithSiblings analyzes a file and enriches it with classes from sibling .k files.
+// This enables cross-file type resolution, completion, hover, and go-to-definition.
+func analyzeWithSiblings(uri string, text []byte) *analysis.Document {
+	filePath := uriToPath(uri)
+	doc := analysis.Analyze(filePath, text)
+	if doc == nil || doc.Gen == nil {
+		return doc
+	}
+
+	// Find sibling .k files in the same project directory
+	siblings := findProjectKFiles(filePath)
+	for _, sibPath := range siblings {
+		// Skip the current file
+		if filepath.Clean(sibPath) == filepath.Clean(filePath) {
+			continue
+		}
+
+		// Check if this sibling is already open in the editor (use in-memory text)
+		sibURI := pathToURI(sibPath)
+		if openDoc, ok := docs[sibURI]; ok && openDoc.AST != nil {
+			doc.Gen.AddFile(openDoc.AST)
+			doc.AddSiblingFile(sibURI, openDoc.AST)
+			continue
+		}
+
+		// Parse from disk
+		src, err := os.ReadFile(sibPath)
+		if err != nil {
+			continue
+		}
+		sibDoc := analysis.Analyze(sibPath, src)
+		if sibDoc != nil && sibDoc.AST != nil {
+			doc.Gen.AddFile(sibDoc.AST)
+			doc.AddSiblingFile(sibURI, sibDoc.AST)
+		}
+	}
+
+	// Re-run semantic checks now that sibling classes are registered
+	if doc.AST != nil {
+		doc.Diags = nil
+		doc.Diags = append(doc.Diags, doc.ParseDiags...)
+		if len(doc.ParseDiags) == 0 {
+			doc.Check()
+		}
+	}
+
+	return doc
+}
+
+// findProjectKFiles finds all .k files in the same directory tree as the given file.
+// Walks the file's directory and its subdirectories (not the entire workspace).
+func findProjectKFiles(filePath string) []string {
+	dir := filepath.Dir(filePath)
+
+	var files []string
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Skip build directories
+		if info.IsDir() && (info.Name() == "build" || info.Name() == ".git" || info.Name() == "node_modules") {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".k") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
+}
+
+func pathToURI(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	absPath = filepath.ToSlash(absPath)
+	if runtime.GOOS == "windows" {
+		return "file:///" + absPath
+	}
+	return "file://" + absPath
 }
 
 func publishDiagnostics(uri string, doc *analysis.Document) {

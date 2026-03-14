@@ -74,22 +74,11 @@ func doBuild(files []string, mode string, dllMode bool) buildResult {
 
 	os.MkdirAll("build", 0755)
 
-	var cFiles []string
-	needsRaylib := false
-	hasHotReload := false
-	for _, file := range files {
-		cFile, usesRL, hotReload, err := compileFile(file, dllMode)
-		if err != nil {
-			return buildResult{}
-		}
-		cFiles = append(cFiles, cFile)
-		if usesRL {
-			needsRaylib = true
-		}
-		if hotReload {
-			hasHotReload = true
-		}
+	cFile, needsRaylib, hasHotReload, err := compileFiles(files, dllMode)
+	if err != nil {
+		return buildResult{}
 	}
+	cFiles := []string{cFile}
 
 	runtimeDir := findRuntime()
 
@@ -234,7 +223,37 @@ func parseArgs() (files []string, mode string) {
 			files = append(files, arg)
 		}
 	}
+	// Expand directory arguments: find all .k files recursively
+	files = expandKFiles(files)
 	return
+}
+
+// expandKFiles expands any directory paths in the list into all .k files found recursively.
+// Plain .k file paths are kept as-is.
+func expandKFiles(paths []string) []string {
+	var result []string
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			result = append(result, p) // keep as-is, let later stages report the error
+			continue
+		}
+		if !info.IsDir() {
+			result = append(result, p)
+			continue
+		}
+		// Walk directory recursively for .k files
+		filepath.Walk(p, func(path string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !fi.IsDir() && strings.HasSuffix(fi.Name(), ".k") {
+				result = append(result, path)
+			}
+			return nil
+		})
+	}
+	return result
 }
 
 // ---------- commands ----------
@@ -295,6 +314,7 @@ func cmdRun() {
 // checkHotReload does a quick lex+parse of the source files to detect
 // if the main class has non-main methods (making it eligible for hot reload).
 func checkHotReload(files []string) bool {
+	var allFiles []*parser.File
 	for _, path := range files {
 		src, err := os.ReadFile(path)
 		if err != nil {
@@ -307,12 +327,13 @@ func checkHotReload(files []string) bool {
 		if err != nil {
 			continue
 		}
-		gen := codegen.New(file)
-		if gen.HasHotReloadMethods() {
-			return true
-		}
+		allFiles = append(allFiles, file)
 	}
-	return false
+	if len(allFiles) == 0 {
+		return false
+	}
+	gen := codegen.NewMulti(allFiles)
+	return gen.HasHotReloadMethods()
 }
 
 func cmdDev() {
@@ -321,6 +342,7 @@ func cmdDev() {
 	// Resolve which .k files to watch
 	watchFiles := files
 	if len(watchFiles) == 0 {
+		// Default: find .k files in current directory (non-recursive for backward compat)
 		entries, err := os.ReadDir(".")
 		if err != nil {
 			fatal("cannot read directory: %v", err)
@@ -335,7 +357,7 @@ func cmdDev() {
 		fatal("no .k files found")
 	}
 
-	// Collect directories to watch
+	// Collect directories to watch (all unique parent dirs of .k files)
 	watchDirs := map[string]bool{}
 	for _, f := range watchFiles {
 		dir := filepath.Dir(f)
@@ -595,13 +617,12 @@ func devRestart(watchFiles []string, watcher *fsnotify.Watcher, sigCh chan os.Si
 
 // ---------- compile pipeline ----------
 
-// compileFile compiles a .k file to .c. Returns the C file path, whether it uses
-// raylib, whether it has hot reload methods, and any error.
-func compileFile(path string, dllMode bool) (string, bool, bool, error) {
+// parseFile lexes and parses a single .k file. Returns the AST, tokens, source, or error.
+func parseFile(path string) (*parser.File, []lexer.Token, []byte, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errs.FormatFileError(path, fmt.Sprintf("could not read file: %v", err)))
-		return "", false, false, err
+		return nil, nil, nil, err
 	}
 
 	// Lex
@@ -622,7 +643,7 @@ func compileFile(path string, dllMode bool) (string, bool, bool, error) {
 			}
 			fmt.Fprintln(os.Stderr, d.Format())
 		}
-		return "", false, false, fmt.Errorf("lexer errors in %s", path)
+		return nil, nil, nil, fmt.Errorf("lexer errors in %s", path)
 	}
 
 	// Parse
@@ -631,35 +652,71 @@ func compileFile(path string, dllMode bool) (string, bool, bool, error) {
 	file, err := p.Parse()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
-		return "", false, false, err
+		return nil, nil, nil, err
 	}
 
-	// Semantic checks
-	doc := &analysis.Document{URI: path, Source: src, Tokens: tokens, AST: file}
-	doc.Gen = codegen.New(file)
-	doc.Check()
-	if len(doc.Diags) > 0 {
-		for _, d := range doc.Diags {
-			fmt.Fprintln(os.Stderr, d.Format())
+	return file, tokens, src, nil
+}
+
+// compileFiles compiles multiple .k files into a single .c file.
+// All files are parsed first, then a multi-file codegen pass produces one C output.
+// Returns the C file path, whether it uses raylib, whether it has hot reload methods, and any error.
+func compileFiles(paths []string, dllMode bool) (string, bool, bool, error) {
+	type parsedFile struct {
+		path   string
+		file   *parser.File
+		tokens []lexer.Token
+		src    []byte
+	}
+
+	// Phase 1: Parse all files
+	var parsed []parsedFile
+	for _, path := range paths {
+		file, tokens, src, err := parseFile(path)
+		if err != nil {
+			return "", false, false, err
 		}
-		return "", false, false, fmt.Errorf("semantic errors in %s", path)
+		parsed = append(parsed, parsedFile{path: path, file: file, tokens: tokens, src: src})
+		fmt.Printf("  parsed %s\n", path)
 	}
 
-	// Generate C
-	gen := doc.Gen
+	// Phase 2: Create multi-file generator (all classes visible to each other)
+	var allFiles []*parser.File
+	for _, pf := range parsed {
+		allFiles = append(allFiles, pf.file)
+	}
+	gen := codegen.NewMulti(allFiles)
+
+	// Phase 3: Semantic checks (each file checked with full cross-file type visibility)
+	hasErrors := false
+	for _, pf := range parsed {
+		doc := &analysis.Document{URI: pf.path, Source: pf.src, Tokens: pf.tokens, AST: pf.file}
+		doc.Gen = gen // share the multi-file generator for type resolution
+		doc.Check()
+		if len(doc.Diags) > 0 {
+			for _, d := range doc.Diags {
+				fmt.Fprintln(os.Stderr, d.Format())
+			}
+			hasErrors = true
+		}
+	}
+	if hasErrors {
+		return "", false, false, fmt.Errorf("semantic errors")
+	}
+
+	// Phase 4: Generate single C output from all files
 	gen.DLLMode = dllMode
 	cSource := gen.Generate()
 	usesRaylib := gen.UsesRaylib()
 	hasHotReload := gen.HasHotReloadMethods()
 
-	base := strings.TrimSuffix(filepath.Base(path), ".k")
-	cPath := filepath.Join("build", base+".c")
+	cPath := filepath.Join("build", "game.c")
 	if err := os.WriteFile(cPath, []byte(cSource), 0644); err != nil {
 		fmt.Fprintln(os.Stderr, errs.FormatSimple(errs.Error, fmt.Sprintf("could not write %s: %v", cPath, err)))
 		return "", false, false, err
 	}
 
-	fmt.Printf("  %s -> %s\n", path, cPath)
+	fmt.Printf("  -> %s\n", cPath)
 	return cPath, usesRaylib, hasHotReload, nil
 }
 

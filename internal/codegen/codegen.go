@@ -236,7 +236,8 @@ var stdlibModules = map[string]bool{
 type Generator struct {
 	out     strings.Builder
 	indent  int
-	file    *parser.File
+	file    *parser.File   // primary file (first file, or single file)
+	files   []*parser.File // all files (for multi-file compilation)
 	classes map[string]*parser.ClassDecl
 	// Current context for resolving identifiers
 	currentClassName string
@@ -273,6 +274,7 @@ type genericMethodInfo struct {
 func New(file *parser.File) *Generator {
 	g := &Generator{
 		file:           file,
+		files:          []*parser.File{file},
 		classes:        make(map[string]*parser.ClassDecl),
 		genericClasses: make(map[string]*parser.ClassDecl),
 	}
@@ -280,6 +282,35 @@ func New(file *parser.File) *Generator {
 		g.registerClasses("", cls)
 	}
 	return g
+}
+
+// NewMulti creates a Generator from multiple parsed files.
+// All classes from all files are registered, enabling cross-file type resolution.
+func NewMulti(files []*parser.File) *Generator {
+	if len(files) == 0 {
+		return New(&parser.File{})
+	}
+	g := &Generator{
+		file:           files[0],
+		files:          files,
+		classes:        make(map[string]*parser.ClassDecl),
+		genericClasses: make(map[string]*parser.ClassDecl),
+	}
+	for _, f := range files {
+		for _, cls := range f.Classes {
+			g.registerClasses("", cls)
+		}
+	}
+	return g
+}
+
+// AddFile adds another parsed file's classes to this generator.
+// Used to give a single-file generator cross-file type visibility.
+func (g *Generator) AddFile(file *parser.File) {
+	g.files = append(g.files, file)
+	for _, cls := range file.Classes {
+		g.registerClasses("", cls)
+	}
 }
 
 func (g *Generator) registerClasses(prefix string, cls *parser.ClassDecl) {
@@ -291,6 +322,15 @@ func (g *Generator) registerClasses(prefix string, cls *parser.ClassDecl) {
 	for _, nested := range cls.Classes {
 		g.registerClasses(fullName, nested)
 	}
+}
+
+// allClasses returns the top-level classes from all files.
+func (g *Generator) allClasses() []*parser.ClassDecl {
+	var all []*parser.ClassDecl
+	for _, f := range g.files {
+		all = append(all, f.Classes...)
+	}
+	return all
 }
 
 // --- Memory management: ownership graph analysis ---
@@ -595,7 +635,7 @@ func (g *Generator) emitDestructorPrototypes(prefix string, cls *parser.ClassDec
 // scanForRaylib walks the AST to detect if the program uses raylib
 // (rl module, Colors/Key/Mouse constants, or with rl).
 func (g *Generator) scanForRaylib() {
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		for _, m := range cls.Methods {
 			if m.Body != nil {
 				if g.scanStmtsForRaylib(m.Body.Stmts) {
@@ -724,32 +764,32 @@ func (g *Generator) Generate() string {
 	// Analyze ownership graph for auto-weak detection
 	g.analyzeOwnershipGraph()
 
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitForwardDecls("", cls)
 	}
 	g.writeln("")
 
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitStructDefs("", cls)
 	}
 
 	g.emitTypeIds()
 
 	// Emit destructor/tracer forward declarations (needed before constructors)
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitDestructorPrototypes("", cls)
 	}
 	g.writeln("")
 
 	// Emit destructor and tracer implementations
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitDestructors("", cls)
 	}
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitTracers("", cls)
 	}
 
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitEnumDefs("", cls)
 	}
 
@@ -759,17 +799,17 @@ func (g *Generator) Generate() string {
 	g.genericClasses = map[string]*parser.ClassDecl{}
 	g.genericClassInstances = map[string][]map[string]string{}
 	// Pass 1: register all generic templates (methods and classes)
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.registerGenericTemplates("", cls)
 	}
 	// Pass 2: scan method bodies for calls to generic methods/classes
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.scanForGenericCalls("", cls)
 	}
 	// Emit monomorphized generic class structs, type IDs, prototypes, and implementations
 	g.emitGenericClassCode()
 
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitPrototypes("", cls)
 	}
 	g.writeln("")
@@ -777,7 +817,7 @@ func (g *Generator) Generate() string {
 	// Save position before implementations — lambda defs will be inserted here
 	preImplLen := g.out.Len()
 
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitImplementations("", cls)
 	}
 
@@ -1062,7 +1102,7 @@ func (g *Generator) mangledGenericName(className, methodName string, typeMap map
 // HasHotReloadMethods returns true if the main class has non-main methods
 // that can be hot-reloaded via function pointer indirection.
 func (g *Generator) HasHotReloadMethods() bool {
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		hasMain := false
 		hasOther := false
 		for _, method := range cls.Methods {
@@ -1081,7 +1121,7 @@ func (g *Generator) HasHotReloadMethods() bool {
 
 func (g *Generator) emitEntryPoint() {
 	// Find a main() method in any class and generate a C main()
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		className := cls.Name
 		for _, method := range cls.Methods {
 			if method.Name == "main" && len(method.Params) == 0 {
@@ -1815,7 +1855,7 @@ func (g *Generator) emitGenericClassCode() {
 
 func (g *Generator) countTypeIds() int {
 	count := 0
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		count += g.countTypeIdsInClass(cls)
 	}
 	return count
@@ -3454,7 +3494,7 @@ func (g *Generator) emitTypeIds() {
 	g.writeln("enum {")
 	g.indent++
 	id := 1
-	for _, cls := range g.file.Classes {
+	for _, cls := range g.allClasses() {
 		g.emitTypeIdEnum("", cls, &id)
 	}
 	g.indent--

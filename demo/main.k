@@ -1,16 +1,6 @@
 # Raylib demo — bouncing balls
 Main:class
 
-Ball:class {
-	position:vec2
-	velocity:vec2
-	radius:float = 10
-
-	update(delta:float) {
-		position += velocity * vec2(delta, delta)
-	}
-}
-
 time := 0.0
 balls:List<Ball> = []
 window_width := 800.0

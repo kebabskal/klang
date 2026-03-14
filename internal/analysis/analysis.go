@@ -15,8 +15,11 @@ type Document struct {
 	Source []byte
 	Tokens []lexer.Token
 	AST    *parser.File
-	Diags  []errs.Diagnostic
+	Diags      []errs.Diagnostic
+	ParseDiags []errs.Diagnostic  // diagnostics from lexing/parsing only (preserved across re-checks)
 	Gen    *codegen.Generator // for type resolution
+	// Cross-file support: sibling .k files in the same project
+	SiblingFiles map[string]*parser.File // URI -> parsed AST of sibling files
 }
 
 // ClassInfo holds resolved information about a class.
@@ -78,6 +81,9 @@ func Analyze(uri string, src []byte) *Document {
 	doc.AST = file
 	doc.Diags = append(doc.Diags, p.Diagnostics()...)
 
+	// Preserve parse-phase diagnostics (before semantic checks add more)
+	doc.ParseDiags = append([]errs.Diagnostic{}, doc.Diags...)
+
 	// Create codegen Generator for type resolution (doesn't generate code)
 	if file != nil {
 		doc.Gen = codegen.New(file)
@@ -89,6 +95,14 @@ func Analyze(uri string, src []byte) *Document {
 	}
 
 	return doc
+}
+
+// AddSiblingFile registers a sibling .k file for cross-file definition lookups.
+func (d *Document) AddSiblingFile(uri string, file *parser.File) {
+	if d.SiblingFiles == nil {
+		d.SiblingFiles = make(map[string]*parser.File)
+	}
+	d.SiblingFiles[uri] = file
 }
 
 // GetClasses returns all registered classes from the codegen.
