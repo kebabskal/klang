@@ -447,6 +447,99 @@ static inline void kl_list_set(KlList* list, int index, void* item) {
     list->data[index] = item;
 }
 
+static inline void kl_list_remove(KlList* list, int index) {
+    if (index < 0 || index >= list->count) return;
+    if (list->items_are_rc && list->data[index]) {
+        kl_release(list->data[index]);
+    }
+    for (int i = index; i < list->count - 1; i++) {
+        list->data[i] = list->data[i + 1];
+    }
+    list->count--;
+}
+
+static inline void kl_list_insert(KlList* list, int index, void* item) {
+    if (index < 0) index = 0;
+    if (index > list->count) index = list->count;
+    if (list->items_are_rc) kl_retain(item);
+    if (list->count >= list->capacity) {
+        list->capacity *= 2;
+        list->data = (void**)realloc(list->data, sizeof(void*) * list->capacity);
+    }
+    for (int i = list->count; i > index; i--) {
+        list->data[i] = list->data[i - 1];
+    }
+    list->data[index] = item;
+    list->count++;
+}
+
+static inline void* kl_list_pop(KlList* list) {
+    if (list->count == 0) return NULL;
+    list->count--;
+    void* item = list->data[list->count];
+    return item;
+}
+
+static inline void* kl_list_first(KlList* list) {
+    if (list->count == 0) return NULL;
+    return list->data[0];
+}
+
+static inline void* kl_list_last(KlList* list) {
+    if (list->count == 0) return NULL;
+    return list->data[list->count - 1];
+}
+
+static inline void kl_list_clear(KlList* list) {
+    if (list->items_are_rc) {
+        for (int i = 0; i < list->count; i++) {
+            if (list->data[i]) kl_release(list->data[i]);
+        }
+    }
+    list->count = 0;
+}
+
+static inline void kl_list_reverse(KlList* list) {
+    for (int i = 0, j = list->count - 1; i < j; i++, j--) {
+        void* tmp = list->data[i];
+        list->data[i] = list->data[j];
+        list->data[j] = tmp;
+    }
+}
+
+static inline KlList* kl_list_clone(KlList* list) {
+    KlList* result = kl_list_new(list->items_are_rc);
+    for (int i = 0; i < list->count; i++) {
+        kl_list_push(result, list->data[i]);
+    }
+    return result;
+}
+
+static inline KlList* kl_list_slice(KlList* list, int start, int end) {
+    if (start < 0) start = 0;
+    if (end > list->count) end = list->count;
+    if (start >= end) return kl_list_new(list->items_are_rc);
+    KlList* result = kl_list_new(list->items_are_rc);
+    for (int i = start; i < end; i++) {
+        kl_list_push(result, list->data[i]);
+    }
+    return result;
+}
+
+static inline bool kl_list_contains(KlList* list, void* item) {
+    for (int i = 0; i < list->count; i++) {
+        if (list->data[i] == item) return true;
+    }
+    return false;
+}
+
+static inline int kl_list_index_of(KlList* list, void* item) {
+    for (int i = 0; i < list->count; i++) {
+        if (list->data[i] == item) return i;
+    }
+    return -1;
+}
+
 // IO (included after KlList is defined)
 #include "kl_io.h"
 

@@ -2420,6 +2420,267 @@ func (g *Generator) listGetCast(elemType string, listVar string, indexVar string
 	return fmt.Sprintf("((%s)kl_list_get(%s, %s))", elemType, listVar, indexVar)
 }
 
+// listGetCastDirect casts a void* expression to the element type
+func (g *Generator) listGetCastDirect(elemType string, expr string) string {
+	if g.isPrimitiveType(elemType) {
+		return fmt.Sprintf("((%s)(intptr_t)%s)", elemType, expr)
+	}
+	return fmt.Sprintf("((%s)%s)", elemType, expr)
+}
+
+// emitListLambdaMethod handles list methods that take lambda arguments.
+// These are handled before general arg emission to control lambda param types.
+func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.MemberExpr) string {
+	obj := g.exprToC(member.Object)
+	elemType := g.resolveForElemType(member.Object)
+	methodName := member.Field
+
+	// Extract the lambda expression from the first argument
+	lambda, ok := e.Args[0].(*parser.LambdaExpr)
+	if !ok {
+		argStr := g.exprToC(e.Args[0])
+		return fmt.Sprintf("/* %s: expected lambda */ %s", methodName, argStr)
+	}
+
+	// Helper: emit element variable declaration from list->data[indexVar]
+	emitElemDecl := func(paramName string, indexVar string) {
+		if g.isPrimitiveType(elemType) {
+			g.writeln("%s %s = (%s)(intptr_t)%s->data[%s];", elemType, paramName, elemType, obj, indexVar)
+		} else {
+			g.writeln("%s %s = (%s)%s->data[%s];", elemType, paramName, elemType, obj, indexVar)
+		}
+	}
+
+	// Helper: temporarily register lambda params as local vars, return restore func
+	withLambdaParams := func(paramTypes []string) func() {
+		saved := make([]struct {
+			name string
+			had  bool
+			val  string
+		}, len(lambda.Params))
+		for i, p := range lambda.Params {
+			if i < len(paramTypes) {
+				saved[i].name = p.Name
+				saved[i].val, saved[i].had = g.localVars[p.Name]
+				g.localVars[p.Name] = paramTypes[i]
+			}
+		}
+		return func() {
+			for _, s := range saved {
+				if s.name == "" {
+					continue
+				}
+				if s.had {
+					g.localVars[s.name] = s.val
+				} else {
+					delete(g.localVars, s.name)
+				}
+			}
+		}
+	}
+
+	// Helper: get the lambda body expression (assumes single return statement)
+	getLambdaExpr := func() parser.Expr {
+		if len(lambda.Body.Stmts) > 0 {
+			if ret, ok := lambda.Body.Stmts[0].(*parser.ReturnStmt); ok {
+				return ret.Value
+			}
+		}
+		return nil
+	}
+
+	id := g.lambdaCounter
+	g.lambdaCounter++
+
+	switch methodName {
+
+	case "remove_all":
+		restore := withLambdaParams([]string{elemType})
+		dstVar := fmt.Sprintf("_dst_%d", id)
+		g.writeln("{")
+		g.indent++
+		g.writeln("int %s = 0;", dstVar)
+		g.writeln("for (int _i = 0; _i < %s->count; _i++) {", obj)
+		g.indent++
+		emitElemDecl(lambda.Params[0].Name, "_i")
+		if expr := getLambdaExpr(); expr != nil {
+			condStr := g.exprToC(expr)
+			g.writeln("if (%s) { if (%s->items_are_rc && %s->data[_i]) kl_release(%s->data[_i]); }", condStr, obj, obj, obj)
+			g.writeln("else { %s->data[%s++] = %s->data[_i]; }", obj, dstVar, obj)
+		}
+		g.indent--
+		g.writeln("}")
+		g.writeln("%s->count = %s;", obj, dstVar)
+		g.indent--
+		g.writeln("}")
+		restore()
+		return "(void)0"
+
+	case "filter":
+		restore := withLambdaParams([]string{elemType})
+		resultVar := fmt.Sprintf("_filtered_%d", id)
+		g.writeln("KlList* %s = kl_list_new(%s->items_are_rc);", resultVar, obj)
+		g.writeln("for (int _i = 0; _i < %s->count; _i++) {", obj)
+		g.indent++
+		emitElemDecl(lambda.Params[0].Name, "_i")
+		if expr := getLambdaExpr(); expr != nil {
+			condStr := g.exprToC(expr)
+			g.writeln("if (%s) kl_list_push(%s, %s->data[_i]);", condStr, resultVar, obj)
+		}
+		g.indent--
+		g.writeln("}")
+		restore()
+		return resultVar
+
+	case "map":
+		restore := withLambdaParams([]string{elemType})
+		resultVar := fmt.Sprintf("_mapped_%d", id)
+		g.writeln("KlList* %s = kl_list_new(%s->items_are_rc);", resultVar, obj)
+		g.writeln("for (int _i = 0; _i < %s->count; _i++) {", obj)
+		g.indent++
+		emitElemDecl(lambda.Params[0].Name, "_i")
+		if expr := getLambdaExpr(); expr != nil {
+			valStr := g.exprToC(expr)
+			mappedType := g.resolveExprType(expr)
+			if g.isPrimitiveType(mappedType) {
+				g.writeln("kl_list_push(%s, (void*)(intptr_t)(%s));", resultVar, valStr)
+			} else {
+				g.writeln("kl_list_push(%s, %s);", resultVar, valStr)
+			}
+		}
+		g.indent--
+		g.writeln("}")
+		restore()
+		return resultVar
+
+	case "find":
+		restore := withLambdaParams([]string{elemType})
+		resultVar := fmt.Sprintf("_found_%d", id)
+		g.writeln("void* %s = NULL;", resultVar)
+		g.writeln("for (int _i = 0; _i < %s->count; _i++) {", obj)
+		g.indent++
+		emitElemDecl(lambda.Params[0].Name, "_i")
+		if expr := getLambdaExpr(); expr != nil {
+			condStr := g.exprToC(expr)
+			g.writeln("if (%s) { %s = %s->data[_i]; break; }", condStr, resultVar, obj)
+		}
+		g.indent--
+		g.writeln("}")
+		restore()
+		return g.listGetCastDirect(elemType, resultVar)
+
+	case "find_index":
+		restore := withLambdaParams([]string{elemType})
+		resultVar := fmt.Sprintf("_fidx_%d", id)
+		g.writeln("int %s = -1;", resultVar)
+		g.writeln("for (int _i = 0; _i < %s->count; _i++) {", obj)
+		g.indent++
+		emitElemDecl(lambda.Params[0].Name, "_i")
+		if expr := getLambdaExpr(); expr != nil {
+			condStr := g.exprToC(expr)
+			g.writeln("if (%s) { %s = _i; break; }", condStr, resultVar)
+		}
+		g.indent--
+		g.writeln("}")
+		restore()
+		return resultVar
+
+	case "sort":
+		if len(lambda.Params) < 2 {
+			return fmt.Sprintf("/* sort: expected 2 lambda params */ (void)0")
+		}
+		cmpName := fmt.Sprintf("_list_cmp_%d", id)
+
+		prevOut := g.out
+		prevIndent := g.indent
+		prevLocalVars := g.localVars
+		prevLocalVarTypes := g.localVarTypes
+
+		g.out = strings.Builder{}
+		g.indent = 1
+		g.localVars = map[string]string{}
+		g.localVarTypes = map[string]parser.TypeExpr{}
+
+		p1 := lambda.Params[0].Name
+		p2 := lambda.Params[1].Name
+		g.localVars[p1] = elemType
+		g.localVars[p2] = elemType
+
+		if g.isPrimitiveType(elemType) {
+			g.writeln("%s %s = (%s)(intptr_t)*(void**)_a;", elemType, p1, elemType)
+			g.writeln("%s %s = (%s)(intptr_t)*(void**)_b;", elemType, p2, elemType)
+		} else {
+			g.writeln("%s %s = (%s)*(void**)_a;", elemType, p1, elemType)
+			g.writeln("%s %s = (%s)*(void**)_b;", elemType, p2, elemType)
+		}
+
+		if expr := getLambdaExpr(); expr != nil {
+			exprStr := g.exprToC(expr)
+			g.writeln("float _r = %s;", exprStr)
+			g.writeln("return (_r > 0) ? 1 : (_r < 0) ? -1 : 0;")
+		}
+
+		body := g.out.String()
+		g.out = prevOut
+		g.indent = prevIndent
+		g.localVars = prevLocalVars
+		g.localVarTypes = prevLocalVarTypes
+
+		fmt.Fprintf(&g.lambdaDefs, "static int %s(const void* _a, const void* _b) {\n%s}\n\n", cmpName, body)
+		return fmt.Sprintf("qsort(%s->data, %s->count, sizeof(void*), %s)", obj, obj, cmpName)
+
+	case "sort_by":
+		cmpName := fmt.Sprintf("_list_cmp_%d", id)
+
+		prevOut := g.out
+		prevIndent := g.indent
+		prevLocalVars := g.localVars
+		prevLocalVarTypes := g.localVarTypes
+
+		g.out = strings.Builder{}
+		g.indent = 1
+		g.localVars = map[string]string{}
+		g.localVarTypes = map[string]parser.TypeExpr{}
+
+		p1 := lambda.Params[0].Name
+		g.localVars[p1] = elemType
+
+		// Declare the param variable, then reuse it for both a and b
+		g.writeln("%s %s;", elemType, p1)
+
+		if expr := getLambdaExpr(); expr != nil {
+			if g.isPrimitiveType(elemType) {
+				g.writeln("%s = (%s)(intptr_t)*(void**)_a;", p1, elemType)
+			} else {
+				g.writeln("%s = (%s)*(void**)_a;", p1, elemType)
+			}
+			exprA := g.exprToC(expr)
+			g.writeln("float _ka = %s;", exprA)
+
+			if g.isPrimitiveType(elemType) {
+				g.writeln("%s = (%s)(intptr_t)*(void**)_b;", p1, elemType)
+			} else {
+				g.writeln("%s = (%s)*(void**)_b;", p1, elemType)
+			}
+			exprB := g.exprToC(expr)
+			g.writeln("float _kb = %s;", exprB)
+
+			g.writeln("return (_ka > _kb) ? 1 : (_ka < _kb) ? -1 : 0;")
+		}
+
+		body := g.out.String()
+		g.out = prevOut
+		g.indent = prevIndent
+		g.localVars = prevLocalVars
+		g.localVarTypes = prevLocalVarTypes
+
+		fmt.Fprintf(&g.lambdaDefs, "static int %s(const void* _a, const void* _b) {\n%s}\n\n", cmpName, body)
+		return fmt.Sprintf("qsort(%s->data, %s->count, sizeof(void*), %s)", obj, obj, cmpName)
+	}
+
+	return fmt.Sprintf("/* unknown list method: %s */ (void)0", methodName)
+}
+
 func (g *Generator) resolveForElemType(iterable parser.Expr) string {
 	if ident, ok := iterable.(*parser.Ident); ok {
 		// Check local var type expressions for List<T>
@@ -2643,6 +2904,14 @@ func (g *Generator) resolveExprTypeName(expr parser.Expr) string {
 }
 
 func (g *Generator) emitCall(e *parser.CallExpr) string {
+	// Handle list lambda methods before general arg emission (lambdas need element type hints)
+	if member, ok := e.Callee.(*parser.MemberExpr); ok && g.isListExpr(member.Object) {
+		switch member.Field {
+		case "sort", "sort_by", "remove_all", "filter", "map", "find", "find_index":
+			return g.emitListLambdaMethod(e, member)
+		}
+	}
+
 	args := make([]string, len(e.Args))
 	for i, arg := range e.Args {
 		args[i] = g.exprToC(arg)
@@ -2787,6 +3056,28 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 				return fmt.Sprintf("%s->count", obj)
 			case "get":
 				return g.listGetCast(elemType, obj, argStr)
+			case "reverse":
+				return fmt.Sprintf("kl_list_reverse(%s)", obj)
+			case "clear":
+				return fmt.Sprintf("kl_list_clear(%s)", obj)
+			case "clone":
+				return fmt.Sprintf("kl_list_clone(%s)", obj)
+			case "pop":
+				return g.listGetCastDirect(elemType, fmt.Sprintf("kl_list_pop(%s)", obj))
+			case "first":
+				return g.listGetCastDirect(elemType, fmt.Sprintf("kl_list_first(%s)", obj))
+			case "last":
+				return g.listGetCastDirect(elemType, fmt.Sprintf("kl_list_last(%s)", obj))
+			case "remove":
+				return fmt.Sprintf("kl_list_remove(%s, %s)", obj, argStr)
+			case "insert":
+				return fmt.Sprintf("kl_list_insert(%s, %s, %s)", obj, args[0], g.listPushCast(args[1], elemType))
+			case "slice":
+				return fmt.Sprintf("kl_list_slice(%s, %s)", obj, argStr)
+			case "contains":
+				return fmt.Sprintf("kl_list_contains(%s, %s)", obj, g.listPushCast(argStr, elemType))
+			case "index_of":
+				return fmt.Sprintf("kl_list_index_of(%s, %s)", obj, g.listPushCast(argStr, elemType))
 			}
 		}
 
@@ -3444,6 +3735,19 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 							return g.inferRlReturnType(member.Field)
 						}
 					}
+				}
+			}
+			// Check if it's a list method call — infer return type
+			if g.isListExpr(member.Object) {
+				switch member.Field {
+				case "clone", "filter", "slice", "map":
+					return "KlList*"
+				case "first", "last", "pop", "find":
+					return g.resolveForElemType(member.Object)
+				case "count", "find_index", "index_of":
+					return "int"
+				case "contains":
+					return "bool"
 				}
 			}
 		}

@@ -1287,7 +1287,14 @@ func (p *Parser) tryParseLambda() Expr {
 	p.advance() // skip =>
 
 	p.skipNewlines()
-	body := p.parseBlock()
+	// Support expression-body lambdas: (x) => expr (no braces)
+	var body *Block
+	if p.check(lexer.TOKEN_LBRACE) {
+		body = p.parseBlock()
+	} else {
+		expr := p.parseExpr()
+		body = &Block{Stmts: []Stmt{&ReturnStmt{Value: expr}}}
+	}
 	return &LambdaExpr{Params: params, Body: body}
 }
 

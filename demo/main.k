@@ -85,6 +85,15 @@ main() {
 		balls.append(ball)
 	}
 
+	# list methods demo
+	balls.remove_all((b) => b.position.y < 200)
+	balls.sort((a, b) => b.position.y - a.position.y)
+	balls.sort_by((b) => b.position.x)
+	balls.reverse()
+	all_moving_left := balls.filter((b) => b.velocity.x < 0)
+	cloned_balls := balls.clone()
+	print("balls: ", balls.count(), " moving left: ", all_moving_left.count(), " cloned: ", cloned_balls.count())
+
 	while not window_should_close() {
 		update()
 		render()

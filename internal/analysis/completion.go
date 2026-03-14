@@ -266,9 +266,16 @@ func (d *Document) resolveFieldType(typeName, fieldName string, classes map[stri
 
 // completeTypeMembers returns completions for any type (user class or built-in).
 func (d *Document) completeTypeMembers(typeName string, classes map[string]*parser.ClassDecl) []CompletionItem {
-	// Check built-in types
+	// Check built-in types (exact match)
 	if members, ok := BuiltinTypeMembers[typeName]; ok {
 		return members
+	}
+	// Check built-in generic types: "List<Ball>" → "List"
+	if idx := strings.Index(typeName, "<"); idx > 0 {
+		baseName := typeName[:idx]
+		if members, ok := BuiltinTypeMembers[baseName]; ok {
+			return members
+		}
 	}
 	// Fall through to class members
 	return d.completeClassMembers(typeName, classes)
