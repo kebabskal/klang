@@ -149,6 +149,52 @@ static void* main_thread_func(void* param) {
 }
 #endif
 
+/* ---- reload watcher (runs on background thread) ---- */
+
+typedef struct {
+    void*            game;
+    game_destroy_fn* destroy_fn_ptr;  /* points to main's destroy_fn */
+    int              generation;
+} WatcherArgs;
+
+#ifdef _WIN32
+static DWORD WINAPI watcher_thread_func(LPVOID param) {
+#else
+static void* watcher_thread_func(void* param) {
+#endif
+    WatcherArgs* w = (WatcherArgs*)param;
+    int generation = w->generation;
+
+    while (!g_quit) {
+        if (file_exists(RELOAD_SIGNAL)) {
+            file_delete(RELOAD_SIGNAL);
+            generation++;
+
+            DllHandle new_dll = load_dll_copy(DLL_PATH, generation);
+            if (!new_dll) {
+                fprintf(stderr, "[host] failed to load new DLL (gen %d)\n", generation);
+            } else {
+                game_patch_fn patch_fn = (game_patch_fn)dll_sym(new_dll, "game_patch");
+                if (patch_fn) {
+                    patch_fn(w->game);
+                    fprintf(stderr, "[host] code patched (gen %d)\n", generation);
+                }
+
+                game_destroy_fn d = (game_destroy_fn)dll_sym(new_dll, "game_destroy");
+                if (d) *(w->destroy_fn_ptr) = d;
+            }
+        }
+        sleep_ms(100);
+    }
+
+    free(w);
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
 /* ---- entry point ---- */
 
 int main(int argc, char** argv) {
@@ -181,52 +227,27 @@ int main(int argc, char** argv) {
     void* game = create_fn();
     fprintf(stderr, "[host] game created (gen %d)\n", generation);
 
-    /* Start main() in a thread */
-    MainThreadArgs* args = (MainThreadArgs*)malloc(sizeof(MainThreadArgs));
-    args->fn = main_fn;
-    args->instance = game;
-    ThreadHandle thread = start_thread(main_thread_func, args);
+    /*
+     * macOS requires all UI/window operations on the main thread (Cocoa).
+     * So on macOS: run game_main() on main thread, watcher on background thread.
+     * On other platforms: run game_main() on background thread, watch on main thread.
+     */
 
-    /* Watch for reload signals while main thread runs */
-    while (!g_quit && thread_alive(thread)) {
-        if (file_exists(RELOAD_SIGNAL)) {
-            file_delete(RELOAD_SIGNAL);
-            generation++;
+    /* Start reload watcher on background thread */
+    WatcherArgs* wargs = (WatcherArgs*)malloc(sizeof(WatcherArgs));
+    wargs->game = game;
+    wargs->destroy_fn_ptr = &destroy_fn;
+    wargs->generation = generation;
+    ThreadHandle watcher = start_thread(watcher_thread_func, wargs);
 
-            /* Load new DLL copy */
-            DllHandle new_dll = load_dll_copy(DLL_PATH, generation);
-            if (!new_dll) {
-                fprintf(stderr, "[host] failed to load new DLL (gen %d)\n", generation);
-                continue;
-            }
+    /* Run game on main thread (required for macOS UI) */
+    main_fn(game);
 
-            /* Patch function pointers in the instance */
-            game_patch_fn patch_fn = (game_patch_fn)dll_sym(new_dll, "game_patch");
-            if (patch_fn) {
-                patch_fn(game);
-                fprintf(stderr, "[host] code patched (gen %d)\n", generation);
-            }
+    /* game_main() returned — signal watcher to stop */
+    g_quit = 1;
+    thread_join(watcher);
 
-            /* Update destroy to latest */
-            game_destroy_fn d = (game_destroy_fn)dll_sym(new_dll, "game_destroy");
-            if (d) destroy_fn = d;
-
-            /* Never unload new_dll or dll_0 — main thread references dll_0 */
-        }
-
-        sleep_ms(100);
-    }
-
-    if (g_quit) {
-        /* Host killed — just exit, OS will clean up threads + DLLs */
-        fprintf(stderr, "[host] shutting down\n");
-        exit(0);
-    }
-
-    /* main() finished naturally */
-    thread_join(thread);
     fprintf(stderr, "[host] main finished\n");
-
     if (destroy_fn && game) destroy_fn(game);
 
     /* Process exit cleans up all loaded DLLs */

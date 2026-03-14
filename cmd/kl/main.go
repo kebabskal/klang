@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -132,6 +133,11 @@ func doBuild(files []string, mode string, dllMode bool) buildResult {
 			args = append(args, "-lhost")
 		} else if isWindows() {
 			args = append(args, "-lraylib", "-lopengl32", "-lgdi32", "-lwinmm")
+		} else if isMacOS() {
+			args = append(args, "-lraylib",
+				"-framework", "OpenGL", "-framework", "Cocoa",
+				"-framework", "IOKit", "-framework", "CoreAudio",
+				"-framework", "CoreVideo")
 		} else {
 			args = append(args, "-lraylib", "-lGL", "-lpthread", "-ldl", "-lrt", "-lX11")
 		}
@@ -193,6 +199,11 @@ func buildHost(needsRaylib bool) buildResult {
 			args = append(args, fmt.Sprintf("-Wl,--out-implib,build%chost.lib", os.PathSeparator))
 			args = append(args, "-Wl,--whole-archive", "-lraylib", "-Wl,--no-whole-archive")
 			args = append(args, "-lopengl32", "-lgdi32", "-lwinmm")
+		} else if isMacOS() {
+			args = append(args, "-lraylib",
+				"-framework", "OpenGL", "-framework", "Cocoa",
+				"-framework", "IOKit", "-framework", "CoreAudio",
+				"-framework", "CoreVideo")
 		} else {
 			args = append(args, "-lraylib", "-lGL", "-lpthread", "-ldl", "-lrt", "-lX11")
 		}
@@ -726,6 +737,10 @@ func isWindows() bool {
 	return os.PathSeparator == '\\'
 }
 
+func isMacOS() bool {
+	return runtime.GOOS == "darwin"
+}
+
 func c(code, text string) string {
 	return code + text + errs.Reset
 }
@@ -757,6 +772,7 @@ func findRaylib() string {
 		filepath.Join(exeDir, "..", "raylib"),
 		"raylib",
 		"C:\\raylib\\raylib",
+		"/opt/homebrew",
 		"/usr/local",
 	}
 
