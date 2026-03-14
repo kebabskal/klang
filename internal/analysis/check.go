@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/klang-lang/klang/internal/errs"
 	"github.com/klang-lang/klang/internal/parser"
@@ -67,9 +68,10 @@ func (d *Document) checkMethod(cls *parser.ClassDecl, className string, method *
 
 	// Class fields (with types)
 	for _, f := range cls.Fields {
-		ktype := d.ResolveFieldType(f, className)
+		// Prefer typeExprToString to preserve generic args (e.g., "List<Ball>")
+		ktype := typeExprToString(f.TypeExpr)
 		if ktype == "" {
-			ktype = typeExprToString(f.TypeExpr)
+			ktype = d.ResolveFieldType(f, className)
 		}
 		scope.set(f.Name, ktype)
 	}
@@ -156,25 +158,23 @@ func (d *Document) checkStmt(stmt parser.Stmt, className string, scope *checkSco
 		d.checkExpr(s.Value, scope)
 		// Type-check assignment: target type must be compatible with value type
 		if s.Op == "=" {
-			if ident, ok := s.Target.(*parser.Ident); ok {
-				targetType := scope.typeOf(ident.Name)
-				if targetType != "" {
-					valueType := d.inferExprType(s.Value, scope)
-					if valueType != "" && !typesCompatible(valueType, targetType) {
-						pos := d.exprPos(s.Value)
-						if pos.Line <= 0 {
-							pos = ident.Pos
-						}
-						d.Diags = append(d.Diags, errs.Diagnostic{
-							File:    d.URI,
-							Line:    pos.Line,
-							Col:     pos.Col,
-							EndCol:  pos.EndCol,
-							Kind:    errs.Error,
-							Message: fmt.Sprintf("cannot assign type '%s' to variable '%s' of type '%s'", valueType, ident.Name, targetType),
-							Source:  errs.GetSourceLine(d.Source, pos.Line),
-						})
+			targetType, targetName := d.resolveAssignTarget(s.Target, scope)
+			if targetType != "" {
+				valueType := d.inferExprType(s.Value, scope)
+				if valueType != "" && !typesCompatible(valueType, targetType) {
+					pos := d.exprPos(s.Value)
+					if pos.Line <= 0 {
+						pos = d.exprPos(s.Target)
 					}
+					d.Diags = append(d.Diags, errs.Diagnostic{
+						File:    d.URI,
+						Line:    pos.Line,
+						Col:     pos.Col,
+						EndCol:  pos.EndCol,
+						Kind:    errs.Error,
+						Message: fmt.Sprintf("cannot assign type '%s' to '%s' of type '%s'", valueType, targetName, targetType),
+						Source:  errs.GetSourceLine(d.Source, pos.Line),
+					})
 				}
 			}
 		}
@@ -280,6 +280,10 @@ func (d *Document) checkExpr(expr parser.Expr, scope *checkScope) {
 
 	case *parser.UnaryExpr:
 		d.checkExpr(e.Operand, scope)
+
+	case *parser.IndexExpr:
+		d.checkExpr(e.Object, scope)
+		d.checkExpr(e.Index, scope)
 
 	case *parser.ArrayLit:
 		for _, elem := range e.Elements {
@@ -589,16 +593,106 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 			return CTypeToKlang(cType)
 		}
 	case *parser.MemberExpr:
-		// For member access, use codegen
+		// Try scope-based resolution first
+		objType := d.inferExprType(e.Object, scope)
+		if objType != "" {
+			fieldType := d.resolveFieldKlangType(objType, e.Field)
+			if fieldType != "" {
+				return fieldType
+			}
+		}
+		// Fallback to codegen
 		if d.Gen != nil {
 			cType := d.Gen.InferCType(expr)
 			return CTypeToKlang(cType)
+		}
+	case *parser.IndexExpr:
+		objType := d.inferExprType(e.Object, scope)
+		elemType := extractListElementType(objType)
+		if elemType != "" {
+			return elemType
 		}
 	}
 	// Fallback to codegen
 	if d.Gen != nil {
 		cType := d.Gen.InferCType(expr)
 		return CTypeToKlang(cType)
+	}
+	return ""
+}
+
+// resolveAssignTarget returns the Klang type and display name of an assignment target.
+func (d *Document) resolveAssignTarget(target parser.Expr, scope *checkScope) (string, string) {
+	switch t := target.(type) {
+	case *parser.Ident:
+		return scope.typeOf(t.Name), t.Name
+	case *parser.MemberExpr:
+		objType := d.inferExprType(t.Object, scope)
+		if objType != "" {
+			fieldType := d.resolveFieldKlangType(objType, t.Field)
+			if fieldType != "" {
+				return fieldType, t.Field
+			}
+		}
+	case *parser.IndexExpr:
+		elemType := d.inferExprType(target, scope)
+		if elemType != "" {
+			return elemType, "element"
+		}
+	}
+	return "", ""
+}
+
+// extractListElementType extracts the element type from "List<T>" → "T".
+func extractListElementType(listType string) string {
+	if !strings.HasPrefix(listType, "List<") || !strings.HasSuffix(listType, ">") {
+		return ""
+	}
+	return listType[5 : len(listType)-1]
+}
+
+// resolveFieldKlangType looks up the Klang type of a field on a class by name.
+func (d *Document) resolveFieldKlangType(className, fieldName string) string {
+	// Built-in value type fields
+	switch className {
+	case "vec2", "vec3", "vec4", "quat":
+		switch fieldName {
+		case "x", "y", "z", "w":
+			return "float"
+		}
+	case "Color":
+		switch fieldName {
+		case "r", "g", "b", "a":
+			return "int"
+		}
+	case "Rectangle":
+		switch fieldName {
+		case "x", "y", "width", "height":
+			return "float"
+		}
+	}
+	// Look up in class definitions
+	classes := d.GetClasses()
+	if classes == nil {
+		return ""
+	}
+	cls := d.findClass(className, classes)
+	if cls == nil {
+		return ""
+	}
+	for _, f := range cls.Fields {
+		if f.Name == fieldName {
+			ktype := typeExprToString(f.TypeExpr)
+			if ktype != "" {
+				return ktype
+			}
+			// Fallback to codegen
+			return d.ResolveFieldType(f, className)
+		}
+	}
+	// Check parent
+	if cls.Parent != "" {
+		return d.resolveFieldKlangType(cls.Parent, fieldName)
 	}
 	return ""
 }
@@ -612,6 +706,8 @@ func (d *Document) exprPos(expr parser.Expr) parser.Pos {
 		return e.Pos
 	case *parser.CallExpr:
 		return d.exprPos(e.Callee)
+	case *parser.IndexExpr:
+		return e.Pos
 	}
 	return parser.Pos{}
 }

@@ -324,6 +324,15 @@ type MemberExpr struct {
 func (m *MemberExpr) nodeTag() {}
 func (m *MemberExpr) exprTag() {}
 
+type IndexExpr struct {
+	Object Expr
+	Index  Expr
+	Pos    Pos
+}
+
+func (i *IndexExpr) nodeTag() {}
+func (i *IndexExpr) exprTag() {}
+
 type IsExpr struct {
 	Expr     Expr
 	TypeName string

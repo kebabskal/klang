@@ -438,6 +438,15 @@ static inline void* kl_list_get(KlList* list, int index) {
     return list->data[index];
 }
 
+static inline void kl_list_set(KlList* list, int index, void* item) {
+    if (index < 0 || index >= list->count) return;
+    if (list->items_are_rc) {
+        kl_retain(item);
+        if (list->data[index]) kl_release(list->data[index]);
+    }
+    list->data[index] = item;
+}
+
 // IO (included after KlList is defined)
 #include "kl_io.h"
 

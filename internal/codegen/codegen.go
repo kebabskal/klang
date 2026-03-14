@@ -700,6 +700,8 @@ func (g *Generator) scanExprForRaylib(expr parser.Expr) bool {
 		return g.scanExprForRaylib(e.Left) || g.scanExprForRaylib(e.Right)
 	case *parser.UnaryExpr:
 		return g.scanExprForRaylib(e.Operand)
+	case *parser.IndexExpr:
+		return g.scanExprForRaylib(e.Object) || g.scanExprForRaylib(e.Index)
 	}
 	return false
 }
@@ -1918,6 +1920,15 @@ func (g *Generator) emitStmt(stmt parser.Stmt, className string) {
 		}
 
 	case *parser.AssignStmt:
+		// Direct index assignment: list[i] = val → kl_list_set(list, i, val)
+		if idx, ok := s.Target.(*parser.IndexExpr); ok && s.Op == "=" {
+			obj := g.exprToC(idx.Object)
+			idxStr := g.exprToC(idx.Index)
+			valueStr := g.exprToC(s.Value)
+			elemType := g.resolveForElemType(idx.Object)
+			g.writeln("kl_list_set(%s, %s, %s);", obj, idxStr, g.listPushCast(valueStr, elemType))
+			break
+		}
 		targetStr := g.exprToC(s.Target)
 		valueStr := g.exprToC(s.Value)
 		targetCType := g.resolveAssignTargetType(s.Target, className)
@@ -2303,6 +2314,10 @@ func (g *Generator) resolveExprType(expr parser.Expr) string {
 			}
 		}
 	}
+	// Handle index access: list[i] → resolve element type
+	if idx, ok := expr.(*parser.IndexExpr); ok {
+		return g.resolveForElemType(idx.Object)
+	}
 	// Handle chained member access: ball.position → resolve field type on class
 	if member, ok := expr.(*parser.MemberExpr); ok {
 		objType := g.resolveExprType(member.Object)
@@ -2351,11 +2366,18 @@ func (g *Generator) listPushCast(valStr string, cType string) string {
 }
 
 // Unwrap a value from kl_list_get: primitives need (type)(intptr_t) cast
+func (g *Generator) emitIndexGet(e *parser.IndexExpr) string {
+	obj := g.exprToC(e.Object)
+	idx := g.exprToC(e.Index)
+	elemType := g.resolveForElemType(e.Object)
+	return g.listGetCast(elemType, obj, idx)
+}
+
 func (g *Generator) listGetCast(elemType string, listVar string, indexVar string) string {
 	if g.isPrimitiveType(elemType) {
-		return fmt.Sprintf("(%s)(intptr_t)kl_list_get(%s, %s)", elemType, listVar, indexVar)
+		return fmt.Sprintf("((%s)(intptr_t)kl_list_get(%s, %s))", elemType, listVar, indexVar)
 	}
-	return fmt.Sprintf("(%s)kl_list_get(%s, %s)", elemType, listVar, indexVar)
+	return fmt.Sprintf("((%s)kl_list_get(%s, %s))", elemType, listVar, indexVar)
 }
 
 func (g *Generator) resolveForElemType(iterable parser.Expr) string {
@@ -2480,6 +2502,8 @@ func (g *Generator) exprToC(expr parser.Expr) string {
 			}
 		}
 		return fmt.Sprintf("%s->%s", obj, e.Field)
+	case *parser.IndexExpr:
+		return g.emitIndexGet(e)
 	case *parser.IsExpr:
 		fullTypeName := g.resolveFullClassName(e.TypeName, g.currentClassName)
 		return fmt.Sprintf("(%s->_header.type_id == KLTYPE_%s)", g.exprToC(e.Expr), fullTypeName)
@@ -2569,6 +2593,11 @@ func (g *Generator) resolveExprTypeName(expr parser.Expr) string {
 				}
 			}
 		}
+	}
+	// Index access: list[i] → element type name
+	if idx, ok := expr.(*parser.IndexExpr); ok {
+		elemType := g.resolveForElemType(idx.Object)
+		return strings.TrimSuffix(elemType, "*")
 	}
 	return ""
 }
@@ -3055,6 +3084,9 @@ func (g *Generator) findCapturesInExpr(expr parser.Expr, seen map[string]bool, c
 		}
 	case *parser.MemberExpr:
 		g.findCapturesInExpr(e.Object, seen, captures)
+	case *parser.IndexExpr:
+		g.findCapturesInExpr(e.Object, seen, captures)
+		g.findCapturesInExpr(e.Index, seen, captures)
 	case *parser.NullCoalesce:
 		g.findCapturesInExpr(e.Left, seen, captures)
 		g.findCapturesInExpr(e.Right, seen, captures)
@@ -3239,6 +3271,9 @@ func (g *Generator) resolveAssignTargetType(target parser.Expr, className string
 				}
 			}
 		}
+	case *parser.IndexExpr:
+		// list[i] = val → element type
+		return g.resolveForElemType(t.Object)
 	}
 	return ""
 }
@@ -3373,6 +3408,8 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 			}
 		}
 		return "int"
+	case *parser.IndexExpr:
+		return g.resolveForElemType(e.Object)
 	case *parser.LambdaExpr:
 		return "KlClosure*"
 	}

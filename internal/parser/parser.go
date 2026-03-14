@@ -1048,6 +1048,14 @@ func (p *Parser) parsePostfix() Expr {
 			expr = p.parseCall(expr)
 			continue
 		}
+		if p.check(lexer.TOKEN_LBRACKET) {
+			bracketPos := p.tokenPos()
+			p.advance() // skip [
+			index := p.parseExpr()
+			p.expect(lexer.TOKEN_RBRACKET)
+			expr = &IndexExpr{Object: expr, Index: index, Pos: bracketPos}
+			continue
+		}
 		break
 	}
 	return expr

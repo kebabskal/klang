@@ -54,13 +54,7 @@ render() {
 	clear_background(gray)
 	
 	# render balls
-	asdf := "test"
-	asdf = 1.0
 	for ball in balls {
-		ball.position.
-		ball.update(asdf)
-		ball.bullle(asdf)
-		ball.bulle = "test"
 		draw_circle_v(ball.position + vec2(0, ball.radius/2), ball.radius*1.25, black)
 	}
 
