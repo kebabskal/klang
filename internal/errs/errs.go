@@ -103,7 +103,7 @@ func (d Diagnostic) Format() string {
 		b.WriteString(d.Source)
 		b.WriteByte('\n')
 
-		// Underline
+		// Underline — replicate tabs from source so carets align with displayed text
 		col := d.Col
 		if col < 1 {
 			col = 1
@@ -113,7 +113,18 @@ func (d Diagnostic) Format() string {
 			underlineLen = 1
 		}
 		b.WriteString(c(Cyan, fmt.Sprintf(" %s | ", pad)))
-		b.WriteString(strings.Repeat(" ", col-1))
+		// Walk source chars: emit tab for tab, space for anything else
+		for i := 0; i < col-1 && i < len(d.Source); i++ {
+			if d.Source[i] == '\t' {
+				b.WriteByte('\t')
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		// If col is beyond source length, pad remaining with spaces
+		if col-1 > len(d.Source) {
+			b.WriteString(strings.Repeat(" ", col-1-len(d.Source)))
+		}
 		b.WriteString(c(BoldRed, strings.Repeat("^", underlineLen)))
 		b.WriteByte('\n')
 	}

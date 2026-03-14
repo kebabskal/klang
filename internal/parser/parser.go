@@ -94,6 +94,7 @@ func (p *Parser) parseTopLevel() *ClassDecl {
 		return nil
 	}
 
+	namePos := p.tokenPos()
 	name := p.current().Value
 	p.advance()
 
@@ -115,6 +116,7 @@ func (p *Parser) parseTopLevel() *ClassDecl {
 		p.skipNewlines()
 		cls := p.parseClassBody(name, "", fileScope)
 		cls.TypeParams = typeParams
+		cls.Pos = namePos
 		return cls
 	}
 
@@ -148,6 +150,7 @@ func (p *Parser) parseClassBody(name, parent string, fileScope bool) *ClassDecl 
 
 		// For braced class, stop at '}'
 		if !fileScope && p.check(lexer.TOKEN_RBRACE) {
+			cls.EndLine = p.current().Line
 			p.advance()
 			return cls
 		}
@@ -206,8 +209,10 @@ func (p *Parser) isNewTopLevelDecl() bool {
 func (p *Parser) parseMember(cls *ClassDecl) {
 	// Constructor
 	if p.check(lexer.TOKEN_CONSTRUCTOR) {
+		ctorPos := p.tokenPos()
 		p.advance()
 		ctor := p.parseConstructor()
+		ctor.Pos = ctorPos
 		cls.Constructor = ctor
 		return
 	}
@@ -218,6 +223,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 		return
 	}
 
+	namePos := p.tokenPos()
 	name := p.current().Value
 	p.advance()
 
@@ -229,6 +235,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 			Name:     name,
 			Value:    val,
 			Inferred: true,
+			Pos:      namePos,
 		})
 		p.skipNewlines()
 		return
@@ -241,6 +248,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 		cls.Fields = append(cls.Fields, &FieldDecl{
 			Name:  name,
 			Value: val,
+			Pos:   namePos,
 		})
 		p.skipNewlines()
 		return
@@ -249,7 +257,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 	// name:Type ...
 	if p.check(lexer.TOKEN_COLON) {
 		p.advance()
-		p.parseMemberAfterColon(cls, name)
+		p.parseMemberAfterColon(cls, name, namePos)
 		return
 	}
 
@@ -258,6 +266,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 		typeParams := p.parseTypeParamList()
 		method := p.parseMethod(name, nil)
 		method.TypeParams = typeParams
+		method.Pos = namePos
 		cls.Methods = append(cls.Methods, method)
 		return
 	}
@@ -265,6 +274,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 	// name(...) { ... } — method (no return type)
 	if p.check(lexer.TOKEN_LPAREN) {
 		method := p.parseMethod(name, nil)
+		method.Pos = namePos
 		cls.Methods = append(cls.Methods, method)
 		return
 	}
@@ -274,7 +284,7 @@ func (p *Parser) parseMember(cls *ClassDecl) {
 }
 
 // parseMemberAfterColon handles Name: <class|enum|event|type> ...
-func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
+func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string, namePos Pos) {
 	// Name:class or Name:class<T> — nested class (braced)
 	if p.check(lexer.TOKEN_CLASS) {
 		p.advance()
@@ -285,6 +295,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 		p.skipNewlines()
 		nested := p.parseClassBody(name, "", false)
 		nested.TypeParams = typeParams
+		nested.Pos = namePos
 		cls.Classes = append(cls.Classes, nested)
 		return
 	}
@@ -293,6 +304,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 	if p.check(lexer.TOKEN_ENUM) {
 		p.advance()
 		en := p.parseEnum(name)
+		en.Pos = namePos
 		cls.Enums = append(cls.Enums, en)
 		return
 	}
@@ -301,6 +313,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 	if p.check(lexer.TOKEN_EVENT) {
 		p.advance()
 		ev := p.parseEvent(name)
+		ev.Pos = namePos
 		cls.Events = append(cls.Events, ev)
 		return
 	}
@@ -323,6 +336,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 		// Peek inside to see if this looks like a class body or a property
 		if p.looksLikeClassBody() {
 			nested := p.parseClassBody(name, st.Name, false)
+			nested.Pos = namePos
 			cls.Classes = append(cls.Classes, nested)
 			return
 		}
@@ -331,6 +345,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 	// Name:type { get => ... set(value) => ... } — property
 	if p.check(lexer.TOKEN_LBRACE) {
 		prop := p.parseProperty(name, typeExpr)
+		prop.Pos = namePos
 		cls.Properties = append(cls.Properties, prop)
 		return
 	}
@@ -343,6 +358,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 			Name:     name,
 			TypeExpr: typeExpr,
 			Value:    val,
+			Pos:      namePos,
 		})
 		p.skipNewlines()
 		return
@@ -352,6 +368,7 @@ func (p *Parser) parseMemberAfterColon(cls *ClassDecl, name string) {
 	cls.Fields = append(cls.Fields, &FieldDecl{
 		Name:     name,
 		TypeExpr: typeExpr,
+		Pos:      namePos,
 	})
 	p.skipNewlines()
 }
@@ -583,6 +600,7 @@ func (p *Parser) parseParams() []*Param {
 	for !p.check(lexer.TOKEN_RPAREN) && !p.isAtEnd() {
 		param := &Param{}
 		if p.check(lexer.TOKEN_IDENT) {
+			param.Pos = p.tokenPos()
 			param.Name = p.current().Value
 			p.advance()
 		}
@@ -699,25 +717,28 @@ func (p *Parser) parseStmt() Stmt {
 
 	// Variable declaration: name := expr (inferred type)
 	if p.check(lexer.TOKEN_IDENT) && p.peekIs(1, lexer.TOKEN_COLON_EQ) {
+		varPos := p.tokenPos()
 		name := p.current().Value
 		p.advance()
 		p.advance() // skip :=
 		val := p.parseExpr()
-		return &VarDecl{Name: name, Value: val, Inferred: true}
+		return &VarDecl{Name: name, Value: val, Inferred: true, Pos: varPos}
 	}
 
 	// Variable declaration: name: = expr (colon space equals, inferred type)
 	if p.check(lexer.TOKEN_IDENT) && p.peekIs(1, lexer.TOKEN_COLON) && p.peekIs(2, lexer.TOKEN_EQ) {
+		varPos := p.tokenPos()
 		name := p.current().Value
 		p.advance()
 		p.advance() // skip :
 		p.advance() // skip =
 		val := p.parseExpr()
-		return &VarDecl{Name: name, Value: val, Inferred: true}
+		return &VarDecl{Name: name, Value: val, Inferred: true, Pos: varPos}
 	}
 
 	// Typed variable declaration: name:Type = expr
 	if p.check(lexer.TOKEN_IDENT) && p.peekIs(1, lexer.TOKEN_COLON) && (p.peekIs(2, lexer.TOKEN_IDENT) || p.peekIs(2, lexer.TOKEN_FN)) {
+		varPos := p.tokenPos()
 		name := p.current().Value
 		p.advance()
 		p.advance() // skip :
@@ -725,10 +746,10 @@ func (p *Parser) parseStmt() Stmt {
 		if p.check(lexer.TOKEN_EQ) {
 			p.advance()
 			val := p.parseExpr()
-			return &VarDecl{Name: name, TypeExpr: typeExpr, Value: val}
+			return &VarDecl{Name: name, TypeExpr: typeExpr, Value: val, Pos: varPos}
 		}
 		// Declaration without initializer
-		return &VarDecl{Name: name, TypeExpr: typeExpr}
+		return &VarDecl{Name: name, TypeExpr: typeExpr, Pos: varPos}
 	}
 
 	// expression statement (which may become an assignment)
@@ -792,9 +813,11 @@ func (p *Parser) parseIf() Stmt {
 }
 
 func (p *Parser) parseFor() Stmt {
+	forPos := p.tokenPos()
 	p.advance() // skip 'for'
 	varName := ""
 	if p.check(lexer.TOKEN_IDENT) {
+		forPos = p.tokenPos() // position of the loop variable
 		varName = p.current().Value
 		p.advance()
 	}
@@ -802,7 +825,7 @@ func (p *Parser) parseFor() Stmt {
 	iter := p.parseExpr()
 	p.skipNewlines()
 	body := p.parseBlock()
-	return &ForStmt{VarName: varName, Iterable: iter, Body: body}
+	return &ForStmt{VarName: varName, Iterable: iter, Body: body, Pos: forPos}
 }
 
 func (p *Parser) parseWhile() Stmt {
@@ -814,6 +837,7 @@ func (p *Parser) parseWhile() Stmt {
 }
 
 func (p *Parser) parseWith() Stmt {
+	withPos := p.tokenPos()
 	p.advance() // skip 'with'
 	if !p.check(lexer.TOKEN_IDENT) {
 		p.error("expected module name after 'with'")
@@ -826,7 +850,7 @@ func (p *Parser) parseWith() Stmt {
 	// Block form: with module { ... }
 	if p.check(lexer.TOKEN_LBRACE) {
 		body := p.parseBlock()
-		return &WithStmt{Module: module, Body: body}
+		return &WithStmt{Module: module, Body: body, Pos: withPos}
 	}
 
 	// Bare form: with module — applies to rest of enclosing block
@@ -842,7 +866,7 @@ func (p *Parser) parseWith() Stmt {
 		}
 		p.skipNewlines()
 	}
-	return &WithStmt{Module: module, Body: &Block{Stmts: stmts}}
+	return &WithStmt{Module: module, Body: &Block{Stmts: stmts}, Pos: withPos}
 }
 
 // --- Expression parsing (precedence climbing) ---
@@ -986,18 +1010,20 @@ func (p *Parser) parsePostfix() Expr {
 		if p.check(lexer.TOKEN_DOT) {
 			p.advance()
 			if p.check(lexer.TOKEN_IDENT) {
+				fieldPos := p.tokenPos()
 				field := p.current().Value
 				p.advance()
-				expr = &MemberExpr{Object: expr, Field: field}
+				expr = &MemberExpr{Object: expr, Field: field, Pos: fieldPos}
 			}
 			continue
 		}
 		if p.check(lexer.TOKEN_QUESTION_DOT) {
 			p.advance()
 			if p.check(lexer.TOKEN_IDENT) {
+				fieldPos := p.tokenPos()
 				field := p.current().Value
 				p.advance()
-				expr = &MemberExpr{Object: expr, Field: field, Optional: true}
+				expr = &MemberExpr{Object: expr, Field: field, Optional: true, Pos: fieldPos}
 			}
 			continue
 		}
@@ -1105,7 +1131,7 @@ func (p *Parser) parsePrimary() Expr {
 		return &ThisExpr{}
 	case lexer.TOKEN_IDENT:
 		p.advance()
-		return &Ident{Name: tok.Value}
+		return &Ident{Name: tok.Value, Pos: Pos{tok.Line, tok.Col, tok.Col + len(tok.Value)}}
 	case lexer.TOKEN_LBRACE:
 		return p.parseStructLit()
 	case lexer.TOKEN_LBRACKET:
@@ -1307,6 +1333,11 @@ func (p *Parser) skipIndent() {
 	for p.check(lexer.TOKEN_INDENT) {
 		p.advance()
 	}
+}
+
+func (p *Parser) tokenPos() Pos {
+	tok := p.current()
+	return Pos{Line: tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value)}
 }
 
 func (p *Parser) error(msg string) {

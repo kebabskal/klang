@@ -1,18 +1,30 @@
 {
   "name": "klang",
   "displayName": "Klang",
-  "description": "Syntax highlighting for the Klang programming language",
-  "version": "0.1.0",
+  "description": "Klang language support with IntelliSense",
+  "version": "0.2.0",
+  "publisher": "klang",
   "engines": {
     "vscode": "^1.75.0"
   },
-  "categories": ["Programming Languages"],
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:klang"
+  ],
+  "main": "./out/extension.js",
   "contributes": {
     "languages": [
       {
         "id": "klang",
-        "aliases": ["Klang", "klang"],
-        "extensions": [".k"],
+        "aliases": [
+          "Klang",
+          "klang"
+        ],
+        "extensions": [
+          ".k"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -22,6 +34,28 @@
         "scopeName": "source.klang",
         "path": "./syntaxes/klang.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Klang",
+      "properties": {
+        "klang.lspPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the kl-lsp language server binary. Leave empty to auto-detect."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
   }
 }

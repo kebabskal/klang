@@ -272,8 +272,9 @@ type genericMethodInfo struct {
 
 func New(file *parser.File) *Generator {
 	g := &Generator{
-		file:    file,
-		classes: make(map[string]*parser.ClassDecl),
+		file:           file,
+		classes:        make(map[string]*parser.ClassDecl),
+		genericClasses: make(map[string]*parser.ClassDecl),
 	}
 	for _, cls := range file.Classes {
 		g.registerClasses("", cls)
@@ -3474,4 +3475,61 @@ func (g *Generator) write(format string, args ...interface{}) {
 		g.out.WriteString("    ")
 	}
 	g.out.WriteString(line)
+}
+
+// --- Exported methods for LSP analysis ---
+
+// GetClasses returns the registered class map (className → *ClassDecl).
+func (g *Generator) GetClasses() map[string]*parser.ClassDecl {
+	return g.classes
+}
+
+// FieldCType resolves the C type of a field declaration.
+func (g *Generator) FieldCType(field *parser.FieldDecl, className string) string {
+	return g.fieldCType(field, className)
+}
+
+// TypeToC converts a Klang type expression to its C representation.
+func (g *Generator) TypeToC(t parser.TypeExpr, context string) string {
+	return g.typeToC(t, context)
+}
+
+// InferCType infers the C type of an expression (safe for LSP — recovers from panics).
+func (g *Generator) InferCType(expr parser.Expr) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = ""
+		}
+	}()
+	return g.inferCType(expr)
+}
+
+// FindFieldInClass checks if a class (or its parents) has a field with the given name.
+func (g *Generator) FindFieldInClass(cls *parser.ClassDecl, name string) bool {
+	return g.findFieldInClass(cls, name)
+}
+
+// FindMethodInClass checks if a class (or its parents) has a method with the given name.
+func (g *Generator) FindMethodInClass(cls *parser.ClassDecl, name string) bool {
+	return g.findMethodInClass(cls, name)
+}
+
+// IsValueType returns true if the C type is a value type (stack-allocated, uses . not ->).
+func (g *Generator) IsValueType(cType string) bool {
+	return g.isValueType(cType)
+}
+
+// StdlibModuleFuncs returns the stdlib module→function→C mapping.
+func StdlibModuleFuncs() map[string]map[string]string {
+	return stdlibModuleFuncs
+}
+
+// StdlibModuleConstants returns the stdlib module→constant→C mapping.
+func StdlibModuleConstants() map[string]map[string]string {
+	return stdlibModuleConstants
+}
+
+// StdlibConstNamespaces returns the namespace→constant→C mapping (Colors, Key, etc.).
+func StdlibConstNamespaces() map[string]map[string]string {
+	return stdlibConstNamespaces
 }

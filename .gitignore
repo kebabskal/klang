@@ -1,11 +1,16 @@
 # Build artifacts
 build/
 kl.exe
-kl
+/kl
+kl-lsp.exe
 
 # IDE
 .vscode/
 .claude/
+
+# VS Code extension
+editors/vscode-klang/node_modules/
+editors/vscode-klang/out/
 
 # Dependencies (vendored separately)
 raylib/

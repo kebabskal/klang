@@ -5,6 +5,13 @@ type Node interface {
 	nodeTag()
 }
 
+// Pos represents a source position for LSP support.
+type Pos struct {
+	Line   int
+	Col    int
+	EndCol int
+}
+
 // --- Top-level ---
 
 type File struct {
@@ -26,7 +33,8 @@ type ClassDecl struct {
 	Enums      []*EnumDecl
 	Properties []*PropertyDecl
 	Events     []*EventDecl
-
+	Pos        Pos
+	EndLine    int // closing brace line for braced classes (0 = unknown/file-scoped)
 }
 
 func (c *ClassDecl) nodeTag() {}
@@ -36,6 +44,7 @@ type FieldDecl struct {
 	TypeExpr TypeExpr // nil if inferred
 	Value    Expr     // nil if no default
 	Inferred bool     // := syntax
+	Pos      Pos
 }
 
 func (f *FieldDecl) nodeTag() {}
@@ -47,6 +56,7 @@ type MethodDecl struct {
 	ReturnType TypeExpr // nil = void
 	Body       *Block
 	IsSpread   bool // act(...) — inherits parent sig
+	Pos        Pos
 }
 
 func (m *MethodDecl) nodeTag() {}
@@ -54,6 +64,7 @@ func (m *MethodDecl) nodeTag() {}
 type ConstructorDecl struct {
 	Params []*Param
 	Body   *Block
+	Pos    Pos
 }
 
 func (c *ConstructorDecl) nodeTag() {}
@@ -61,11 +72,13 @@ func (c *ConstructorDecl) nodeTag() {}
 type Param struct {
 	Name     string
 	TypeExpr TypeExpr
+	Pos      Pos
 }
 
 type EnumDecl struct {
 	Name    string
 	Members []*EnumMember
+	Pos     Pos
 }
 
 func (e *EnumDecl) nodeTag() {}
@@ -73,6 +86,7 @@ func (e *EnumDecl) nodeTag() {}
 type EnumMember struct {
 	Name  string
 	Value Expr // nil = auto
+	Pos   Pos
 }
 
 type PropertyDecl struct {
@@ -80,6 +94,7 @@ type PropertyDecl struct {
 	TypeExpr TypeExpr
 	Getter   Expr   // expression for get =>
 	Setter   *Block // block for set(value) => { ... }
+	Pos      Pos
 }
 
 func (p *PropertyDecl) nodeTag() {}
@@ -87,6 +102,7 @@ func (p *PropertyDecl) nodeTag() {}
 type EventDecl struct {
 	Name     string
 	TypeExpr TypeExpr // the event payload type
+	Pos      Pos
 }
 
 func (e *EventDecl) nodeTag() {}
@@ -172,6 +188,7 @@ type ForStmt struct {
 	VarName    string
 	Iterable   Expr
 	Body       *Block
+	Pos        Pos
 }
 
 func (f *ForStmt) nodeTag() {}
@@ -190,6 +207,7 @@ type VarDecl struct {
 	TypeExpr TypeExpr // nil if inferred
 	Value    Expr
 	Inferred bool // := syntax
+	Pos      Pos
 }
 
 func (v *VarDecl) nodeTag() {}
@@ -207,6 +225,7 @@ func (a *AssignStmt) stmtTag() {}
 type WithStmt struct {
 	Module string
 	Body   *Block
+	Pos    Pos
 }
 
 func (w *WithStmt) nodeTag() {}
@@ -228,6 +247,7 @@ type Expr interface {
 
 type Ident struct {
 	Name string
+	Pos  Pos
 }
 
 func (i *Ident) nodeTag() {}
@@ -298,6 +318,7 @@ type MemberExpr struct {
 	Object   Expr
 	Field    string
 	Optional bool // ?.
+	Pos      Pos
 }
 
 func (m *MemberExpr) nodeTag() {}

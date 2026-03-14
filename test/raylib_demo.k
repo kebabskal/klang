@@ -43,28 +43,33 @@ update() {
 
 render() {
 	with rl
+
 	black := Color(0, 0, 0, 255)
 	white := Color(255, 255, 255, 255)
-	gray := Color(64, 64, 64, 255)
+	gray := Color(32, 32, 32, 255)
 	magenta := Color(255, 0, 255, 255)
 	
 	# render
 	begin_drawing()
-	clear_background(black)
+	clear_background(gray)
 	
 	# render balls
+	asdf := "test"
+	asdf = 1.0
 	for ball in balls {
-		draw_circle_v(ball.position, ball.radius, white)
+		ball.position.
+		ball.update(asdf)
+		ball.bullle(asdf)
+		ball.bulle = "test"
+		draw_circle_v(ball.position + vec2(0, ball.radius/2), ball.radius*1.25, black)
 	}
 
-	for i in 10 {
-		draw_text(
-			"x", 
-			100 + i * 10, 
-			window_height/2 + sin(i/3.0 + time * 3.0) * 100.0, 
-			20, 
-			white
-		)
+	for ball in balls {
+		draw_circle_v(ball.position, ball.radius, magenta)
+	}
+		
+	for ball in balls {
+		rl.draw_circle_v(ball.position + vec2(0, -ball.radius/2), ball.radius/3, white)
 	}
 
 	# fps
@@ -81,17 +86,14 @@ main() {
 	init_window(window_width, window_height, "klang raylib demo")
 	set_target_fps(240)
 
-
 	rnd := Random(1337)
-	for i in 10 {
+	for i in 20 {
 		ball := Ball()
 		ball.position = vec2(rnd.rangef(100, window_width-100), rnd.rangef(100, window_height-100))
 		ball.velocity = vec2(rnd.rangef(-500, 500), rnd.rangef(-500, 500))
-		ball.radius = rnd.rangef(5, 20)
+		ball.radius = rnd.rangef(10, 20)
 		balls.append(ball)
 	}
-
-	an_unused_variable_that_should_trigger_a_warning := "yeah"
 
 	while not window_should_close() {
 		update()
