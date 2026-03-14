@@ -260,6 +260,8 @@ type Generator struct {
 	withModules []string // stack of active "with" modules
 	// Raylib detection
 	usesRaylib bool
+	// DLL hot-reload mode
+	DLLMode bool
 }
 
 type genericMethodInfo struct {
@@ -1053,24 +1055,105 @@ func (g *Generator) mangledGenericName(className, methodName string, typeMap map
 	return className + "_" + methodName + "_" + g.mangledSuffix(typeMap, typeParams)
 }
 
+// HasHotReloadMethods returns true if the main class has methods beyond main()
+// that could benefit from hot reload (any non-main method).
+func (g *Generator) HasHotReloadMethods() bool {
+	for _, cls := range g.file.Classes {
+		hasMain := false
+		hasOtherMethods := false
+		for _, method := range cls.Methods {
+			if method.Name == "main" && len(method.Params) == 0 {
+				hasMain = true
+			} else {
+				hasOtherMethods = true
+			}
+		}
+		if hasMain && hasOtherMethods {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Generator) emitEntryPoint() {
 	// Find a main() method in any class and generate a C main()
 	for _, cls := range g.file.Classes {
 		className := cls.Name
 		for _, method := range cls.Methods {
 			if method.Name == "main" && len(method.Params) == 0 {
-				g.writeln("int main(int argc, char** argv) {")
-				g.indent++
-				g.writeln("%s* _instance = %s_new(%s);", className, className, g.defaultConstructorArgs(cls))
-				g.writeln("%s_main(_instance);", className)
-				g.writeln("kl_release(_instance);")
-				g.writeln("return 0;")
-				g.indent--
-				g.writeln("}")
+				if g.DLLMode {
+					g.emitDLLHooks(cls, className)
+				} else {
+					g.writeln("int main(int argc, char** argv) {")
+					g.indent++
+					g.writeln("%s* _instance = %s_new(%s);", className, className, g.defaultConstructorArgs(cls))
+					g.writeln("%s_main(_instance);", className)
+					g.writeln("kl_release(_instance);")
+					g.writeln("return 0;")
+					g.indent--
+					g.writeln("}")
+				}
 				return
 			}
 		}
 	}
+}
+
+func (g *Generator) emitDLLHooks(cls *parser.ClassDecl, className string) {
+	// Platform-specific export macro
+	g.writeln("#ifdef _WIN32")
+	g.writeln("#define KL_EXPORT __declspec(dllexport)")
+	g.writeln("#else")
+	g.writeln("#define KL_EXPORT __attribute__((visibility(\"default\")))")
+	g.writeln("#endif")
+	g.writeln("")
+
+	// game_create — allocates the main class instance and runs main() for init
+	g.writeln("KL_EXPORT void* game_create(void) {")
+	g.indent++
+	g.writeln("%s* _instance = %s_new(%s);", className, className, g.defaultConstructorArgs(cls))
+	g.writeln("%s_main(_instance);", className)
+	g.writeln("return _instance;")
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// Export every non-main method as game_<methodName>(void* self)
+	// This allows the host to call any method by name.
+	var tickMethods []string
+	for _, m := range cls.Methods {
+		if m.Name == "main" {
+			continue
+		}
+		hookName := "game_" + m.Name
+		tickMethods = append(tickMethods, m.Name)
+
+		g.writeln("KL_EXPORT void %s(void* self) {", hookName)
+		g.indent++
+		g.writeln("%s_%s((%s*)self);", className, m.Name, className)
+		g.indent--
+		g.writeln("}")
+		g.writeln("")
+	}
+
+	// game_tick — calls all non-main methods in declaration order.
+	// This is the default "frame" function the host calls each iteration.
+	g.writeln("KL_EXPORT void game_tick(void* self) {")
+	g.indent++
+	for _, name := range tickMethods {
+		g.writeln("%s_%s((%s*)self);", className, name, className)
+	}
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// game_destroy — releases the instance
+	g.writeln("KL_EXPORT void game_destroy(void* self) {")
+	g.indent++
+	g.writeln("if (self) kl_release(self);")
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
 }
 
 func (g *Generator) defaultConstructorArgs(cls *parser.ClassDecl) string {

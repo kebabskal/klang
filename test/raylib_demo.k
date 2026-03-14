@@ -11,6 +11,66 @@ Ball:class {
 	}
 }
 
+time := 0.0
+balls:List<Ball> = []
+
+update() {
+	dt := get_frame_time()
+	time += dt
+
+	# update balls
+	for ball in balls {
+		ball.update(dt)
+
+		# Bounce off walls
+		if ball.position.x - ball.radius < 0.0 {
+			ball.velocity = vec2(math.abs(ball.velocity.x), ball.velocity.y)
+		}
+		if ball.position.x + ball.radius > window_width {
+			ball.velocity = vec2(-math.abs(ball.velocity.x), ball.velocity.y)
+		}
+		if ball.position.y - ball.radius < 0.0 {
+			ball.velocity = vec2(ball.velocity.x, math.abs(ball.velocity.y))
+		}
+		if ball.position.y + ball.radius > window_height {
+			ball.velocity = vec2(ball.velocity.x, -math.abs(ball.velocity.y))
+		}
+	}
+}
+
+render() {
+	black := Color(0, 0, 0, 255)
+	white := Color(255, 255, 255, 255)
+	gray := Color(64, 64, 64, 255)
+	magenta := Color(255, 0, 255, 255)
+	
+	# render
+	begin_drawing()
+	clear_background(black)
+	
+	# render balls
+	for ball in balls {
+		draw_circle_v(ball.position, ball.radius, gray)
+	}
+
+	for i in 40 {
+		draw_text(
+			"x", 
+			100 + i * 10, 
+			window_height/2 + sin(i/3.0 + time * 3.0) * 100.0, 
+			20, 
+			white
+		)
+	}
+
+	# fps
+	draw_fps(10, 10)
+
+	end_drawing()
+}
+
+
+
 main() {
 	with rl
 	
@@ -20,7 +80,6 @@ main() {
 	init_window(window_width, window_height, "klang raylib demo")
 	set_target_fps(240)
 
-	balls:List<Ball> = []
 
 	rnd := Random(1337)
 	for i in 1000 {
@@ -33,58 +92,9 @@ main() {
 
 	an_unused_variable_that_should_trigger_a_warning := "yeah"
 	
-	time := 0.0
 	while not window_should_close() {
-		dt := get_frame_time()
-		time += dt
-
-		# update balls
-		for ball in balls {
-			ball.update(dt)
-
-			# Bounce off walls
-			if ball.position.x - ball.radius < 0.0 {
-				ball.velocity = vec2(math.abs(ball.velocity.x), ball.velocity.y)
-			}
-			if ball.position.x + ball.radius > window_width {
-				ball.velocity = vec2(-math.abs(ball.velocity.x), ball.velocity.y)
-			}
-			if ball.position.y - ball.radius < 0.0 {
-				ball.velocity = vec2(ball.velocity.x, math.abs(ball.velocity.y))
-			}
-			if ball.position.y + ball.radius > window_height {
-				ball.velocity = vec2(ball.velocity.x, -math.abs(ball.velocity.y))
-			}
-		}
-
-		black := Color(0, 0, 0, 255)
-		white := Color(255, 255, 255, 255)
-		gray := Color(64, 64, 64, 255)
-		magenta := Color(255, 0, 255, 255)
-		
-		# render
-		begin_drawing()
-		clear_background(black)
-		
-		# render balls
-		for ball in balls {
-			draw_circle_v(ball.position, ball.radius, gray)
-		}
-
-		for i in 40 {
-			draw_text(
-				"x", 
-				100 + i * 10, 
-				window_height/2 + sin(i/3.0 + time * 3.0) * 100.0, 
-				20, 
-				white
-			)
-		}
-
-		# render fps
-		draw_fps(10, 10)
-
-		end_drawing()
+		update()
+		render()
 	}
 
 	close_window()
