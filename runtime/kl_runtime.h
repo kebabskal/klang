@@ -7,6 +7,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #include <windows.h>
+#else
+  #include <unistd.h>
+#endif
+
 // Standard library headers
 #include "kl_math.h"
 #include "kl_vector.h"
@@ -292,19 +299,19 @@ static void kl_gc_collect_cycles(void) {
 // ============================================================================
 
 static inline void kl_print_str(const char* s) {
-    printf("%s\n", s);
+    printf("%s\n", s); fflush(stdout);
 }
 
 static inline void kl_print_int(int v) {
-    printf("%d\n", v);
+    printf("%d\n", v); fflush(stdout);
 }
 
 static inline void kl_print_float(float v) {
-    printf("%g\n", v);
+    printf("%g\n", v); fflush(stdout);
 }
 
 static inline void kl_print_bool(bool v) {
-    printf("%s\n", v ? "true" : "false");
+    printf("%s\n", v ? "true" : "false"); fflush(stdout);
 }
 
 #define print(x) _Generic((x), \
@@ -320,7 +327,7 @@ static inline void kl_print_inline_str(const char* s) { printf("%s", s); }
 static inline void kl_print_inline_int(int v) { printf("%d", v); }
 static inline void kl_print_inline_float(float v) { printf("%g", v); }
 static inline void kl_print_inline_bool(bool v) { printf("%s", v ? "true" : "false"); }
-static inline void kl_print_nl(void) { printf("\n"); }
+static inline void kl_print_nl(void) { printf("\n"); fflush(stdout); }
 
 #define kl_print_inline(x) _Generic((x), \
     const char*: kl_print_inline_str, \
@@ -329,6 +336,20 @@ static inline void kl_print_nl(void) { printf("\n"); }
     float: kl_print_inline_float, \
     _Bool: kl_print_inline_bool \
 )(x)
+
+// ============================================================================
+// Wait / Sleep
+// ============================================================================
+
+#ifdef _WIN32
+static inline void kl_wait(float seconds) {
+    Sleep((DWORD)(seconds * 1000.0f));
+}
+#else
+static inline void kl_wait(float seconds) {
+    usleep((useconds_t)(seconds * 1000000.0f));
+}
+#endif
 
 // ============================================================================
 // Closures

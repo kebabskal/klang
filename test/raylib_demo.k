@@ -13,8 +13,11 @@ Ball:class {
 
 time := 0.0
 balls:List<Ball> = []
+window_width := 800.0
+window_height := 600.0
 
 update() {
+	with rl
 	dt := get_frame_time()
 	time += dt
 
@@ -39,6 +42,7 @@ update() {
 }
 
 render() {
+	with rl
 	black := Color(0, 0, 0, 255)
 	white := Color(255, 255, 255, 255)
 	gray := Color(64, 64, 64, 255)
@@ -53,7 +57,7 @@ render() {
 		draw_circle_v(ball.position, ball.radius, gray)
 	}
 
-	for i in 40 {
+	for i in 10 {
 		draw_text(
 			"x", 
 			100 + i * 10, 
@@ -73,16 +77,13 @@ render() {
 
 main() {
 	with rl
-	
-	window_width := 800.0
-	window_height := 600.0
 
 	init_window(window_width, window_height, "klang raylib demo")
 	set_target_fps(240)
 
 
 	rnd := Random(1337)
-	for i in 1000 {
+	for i in 10 {
 		ball := Ball()
 		ball.position = vec2(rnd.rangef(100, window_width-100), rnd.rangef(100, window_height-100))
 		ball.velocity = vec2(rnd.rangef(-500, 500), rnd.rangef(-500, 500))
@@ -91,7 +92,7 @@ main() {
 	}
 
 	an_unused_variable_that_should_trigger_a_warning := "yeah"
-	
+
 	while not window_should_close() {
 		update()
 		render()

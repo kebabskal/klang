@@ -4,9 +4,13 @@
  * Architecture:
  *   - This host is compiled once and stays running.
  *   - Game code is compiled to a shared library (game.dll / game.so).
- *   - On each frame, the host calls game_update() and game_render() from the DLL.
- *   - When build/.reload appears, the host unloads the old DLL and loads the new one.
- *   - Game state (the void* instance) persists across reloads.
+ *   - game_create() allocates the instance, game_main() runs the full main().
+ *   - game_main() runs in a separate thread so the host can watch for reloads.
+ *   - On reload: host loads the NEW DLL alongside the old (never unloads old),
+ *     calls game_patch() to update function pointers in the instance.
+ *   - main() calls methods through instance-stored function pointers,
+ *     so updated methods take effect on the next call.
+ *   - Old DLLs stay loaded (main thread's stack references them).
  *
  * Compile: gcc -o build/host runtime/kl_host.c -Iruntime -lm [raylib flags]
  */
@@ -14,88 +18,107 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 
-/* ---- platform-specific DLL loading ---- */
+static volatile int g_quit = 0;
+
+static void signal_handler(int sig) {
+    (void)sig;
+    g_quit = 1;
+}
+
+/* ---- platform abstraction ---- */
 
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
 
   typedef HMODULE DllHandle;
+  typedef HANDLE  ThreadHandle;
 
   static DllHandle dll_load(const char* path) {
-      /* Copy to temp file so the original can be overwritten during rebuild */
-      const char* tmp_path = "build\\game_live.dll";
-      CopyFileA(path, tmp_path, FALSE);
-      return LoadLibraryA(tmp_path);
+      return LoadLibraryA(path);
   }
-
-  static void dll_unload(DllHandle h) {
-      if (h) FreeLibrary(h);
-  }
-
   static void* dll_sym(DllHandle h, const char* name) {
       return (void*)GetProcAddress(h, name);
   }
-
   static int file_exists(const char* path) {
-      DWORD attr = GetFileAttributesA(path);
-      return (attr != INVALID_FILE_ATTRIBUTES);
+      return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+  }
+  static void file_delete(const char* path) { DeleteFileA(path); }
+  static void sleep_ms(int ms) { Sleep(ms); }
+
+  /* Copy game.dll to a uniquely-named file and load that.
+   * This keeps the original unlocked for the next rebuild. */
+  static DllHandle load_dll_copy(const char* src, int gen) {
+      char dest[256];
+      snprintf(dest, sizeof(dest), "build\\_game_%d.dll", gen);
+      CopyFileA(src, dest, FALSE);
+      return dll_load(dest);
   }
 
-  static void file_delete(const char* path) {
-      DeleteFileA(path);
+  /* Thread wrapper */
+  typedef DWORD WINAPI ThreadFunc(LPVOID);
+  static ThreadHandle start_thread(ThreadFunc* fn, void* arg) {
+      return CreateThread(NULL, 0, fn, arg, 0, NULL);
   }
-
-  static void sleep_ms(int ms) {
-      Sleep(ms);
+  static int thread_alive(ThreadHandle h) {
+      return WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+  }
+  static void thread_join(ThreadHandle h) {
+      WaitForSingleObject(h, INFINITE);
+      CloseHandle(h);
   }
 
 #else
   #include <dlfcn.h>
   #include <unistd.h>
   #include <sys/stat.h>
+  #include <pthread.h>
 
   typedef void* DllHandle;
+  typedef pthread_t ThreadHandle;
 
   static DllHandle dll_load(const char* path) {
-      /* Copy to temp file so the original can be overwritten during rebuild */
-      const char* tmp_path = "build/game_live.so";
-      char cmd[512];
-      snprintf(cmd, sizeof(cmd), "cp '%s' '%s'", path, tmp_path);
-      system(cmd);
-      return dlopen(tmp_path, RTLD_NOW);
+      return dlopen(path, RTLD_NOW);
   }
-
-  static void dll_unload(DllHandle h) {
-      if (h) dlclose(h);
-  }
-
   static void* dll_sym(DllHandle h, const char* name) {
       return dlsym(h, name);
   }
-
   static int file_exists(const char* path) {
       struct stat st;
       return stat(path, &st) == 0;
   }
+  static void file_delete(const char* path) { unlink(path); }
+  static void sleep_ms(int ms) { usleep(ms * 1000); }
 
-  static void file_delete(const char* path) {
-      unlink(path);
+  static DllHandle load_dll_copy(const char* src, int gen) {
+      char dest[256];
+      snprintf(dest, sizeof(dest), "build/_game_%d.so", gen);
+      char cmd[512];
+      snprintf(cmd, sizeof(cmd), "cp '%s' '%s'", src, dest);
+      system(cmd);
+      return dll_load(dest);
   }
 
-  static void sleep_ms(int ms) {
-      usleep(ms * 1000);
+  static ThreadHandle start_thread(void* (*fn)(void*), void* arg) {
+      pthread_t t;
+      pthread_create(&t, NULL, fn, arg);
+      return t;
   }
+  static int thread_alive(ThreadHandle h) {
+      return pthread_kill(h, 0) == 0;  /* 0 = thread exists */
+  }
+  static void thread_join(ThreadHandle h) { pthread_join(h, NULL); }
 #endif
 
-/* ---- function pointer types ---- */
+/* ---- DLL function signatures ---- */
 typedef void* (*game_create_fn)(void);
-typedef void  (*game_tick_fn)(void*);
+typedef void  (*game_main_fn)(void*);
+typedef void  (*game_patch_fn)(void*);
 typedef void  (*game_destroy_fn)(void*);
 
-/* ---- main ---- */
-
+/* ---- paths ---- */
 #ifdef _WIN32
   #define DLL_PATH "build\\game.dll"
   #define RELOAD_SIGNAL "build\\.reload"
@@ -104,97 +127,108 @@ typedef void  (*game_destroy_fn)(void*);
   #define RELOAD_SIGNAL "build/.reload"
 #endif
 
+/* ---- main-thread runner ---- */
+typedef struct {
+    game_main_fn fn;
+    void*        instance;
+} MainThreadArgs;
+
+#ifdef _WIN32
+static DWORD WINAPI main_thread_func(LPVOID param) {
+    MainThreadArgs* a = (MainThreadArgs*)param;
+    a->fn(a->instance);
+    free(a);
+    return 0;
+}
+#else
+static void* main_thread_func(void* param) {
+    MainThreadArgs* a = (MainThreadArgs*)param;
+    a->fn(a->instance);
+    free(a);
+    return NULL;
+}
+#endif
+
+/* ---- entry point ---- */
+
 int main(int argc, char** argv) {
     (void)argc; (void)argv;
+    int generation = 0;
 
-    /* Load game DLL */
-    DllHandle dll = dll_load(DLL_PATH);
-    if (!dll) {
-        fprintf(stderr, "[host] failed to load game DLL: %s\n", DLL_PATH);
-#ifndef _WIN32
-        fprintf(stderr, "[host] dlerror: %s\n", dlerror());
-#endif
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    /* Clear stale reload signal */
+    if (file_exists(RELOAD_SIGNAL)) file_delete(RELOAD_SIGNAL);
+
+    /* Load initial DLL (copied so game.dll stays unlocked) */
+    DllHandle dll_0 = load_dll_copy(DLL_PATH, generation);
+    if (!dll_0) {
+        fprintf(stderr, "[host] failed to load DLL\n");
         return 1;
     }
 
-    game_create_fn  create_fn  = (game_create_fn)dll_sym(dll, "game_create");
-    game_tick_fn    tick_fn    = (game_tick_fn)dll_sym(dll, "game_tick");
-    game_destroy_fn destroy_fn = (game_destroy_fn)dll_sym(dll, "game_destroy");
+    game_create_fn  create_fn  = (game_create_fn)dll_sym(dll_0, "game_create");
+    game_main_fn    main_fn    = (game_main_fn)dll_sym(dll_0, "game_main");
+    game_destroy_fn destroy_fn = (game_destroy_fn)dll_sym(dll_0, "game_destroy");
 
-    if (!create_fn) {
-        fprintf(stderr, "[host] game DLL missing game_create()\n");
-        dll_unload(dll);
+    if (!create_fn || !main_fn) {
+        fprintf(stderr, "[host] DLL missing game_create/game_main\n");
         return 1;
     }
 
-    /* Create game instance */
+    /* Create instance */
     void* game = create_fn();
-    int generation = 1;
+    fprintf(stderr, "[host] game created (gen %d)\n", generation);
 
-    fprintf(stderr, "[host] game loaded (gen %d)\n", generation);
+    /* Start main() in a thread */
+    MainThreadArgs* args = (MainThreadArgs*)malloc(sizeof(MainThreadArgs));
+    args->fn = main_fn;
+    args->instance = game;
+    ThreadHandle thread = start_thread(main_thread_func, args);
 
-    /* Main loop */
-    while (1) {
-        /* Check for reload signal */
+    /* Watch for reload signals while main thread runs */
+    while (!g_quit && thread_alive(thread)) {
         if (file_exists(RELOAD_SIGNAL)) {
             file_delete(RELOAD_SIGNAL);
-
-            fprintf(stderr, "[host] reloading DLL...\n");
-
-            /* Destroy old instance */
-            if (destroy_fn && game) {
-                destroy_fn(game);
-                game = NULL;
-            }
-
-            /* Unload old DLL */
-            dll_unload(dll);
-            dll = NULL;
-
-            /* Small delay to ensure file is fully written */
-            sleep_ms(50);
-
-            /* Load new DLL */
-            dll = dll_load(DLL_PATH);
-            if (!dll) {
-                fprintf(stderr, "[host] failed to reload DLL, waiting...\n");
-                sleep_ms(500);
-                continue;
-            }
-
-            /* Re-resolve symbols */
-            create_fn  = (game_create_fn)dll_sym(dll, "game_create");
-            tick_fn    = (game_tick_fn)dll_sym(dll, "game_tick");
-            destroy_fn = (game_destroy_fn)dll_sym(dll, "game_destroy");
-
-            if (!create_fn) {
-                fprintf(stderr, "[host] reloaded DLL missing game_create()\n");
-                continue;
-            }
-
-            /* Recreate game instance */
-            game = create_fn();
             generation++;
-            fprintf(stderr, "[host] game reloaded (gen %d)\n", generation);
+
+            /* Load new DLL copy */
+            DllHandle new_dll = load_dll_copy(DLL_PATH, generation);
+            if (!new_dll) {
+                fprintf(stderr, "[host] failed to load new DLL (gen %d)\n", generation);
+                continue;
+            }
+
+            /* Patch function pointers in the instance */
+            game_patch_fn patch_fn = (game_patch_fn)dll_sym(new_dll, "game_patch");
+            if (patch_fn) {
+                patch_fn(game);
+                fprintf(stderr, "[host] code patched (gen %d)\n", generation);
+            }
+
+            /* Update destroy to latest */
+            game_destroy_fn d = (game_destroy_fn)dll_sym(new_dll, "game_destroy");
+            if (d) destroy_fn = d;
+
+            /* Never unload new_dll or dll_0 — main thread references dll_0 */
         }
 
-        /* Call game_tick which invokes all non-main methods in order */
-        if (tick_fn && game) tick_fn(game);
-
-        /* If no tick function, this is a non-interactive program.
-         * Run create once and exit. */
-        if (!tick_fn) {
-            break;
-        }
-
-        /* Throttle to ~60fps for non-raylib programs.
-         * Raylib programs manage their own frame timing via set_target_fps(). */
-        sleep_ms(16);
+        sleep_ms(100);
     }
 
-    /* Cleanup */
-    if (destroy_fn && game) destroy_fn(game);
-    dll_unload(dll);
+    if (g_quit) {
+        /* Host killed — just exit, OS will clean up threads + DLLs */
+        fprintf(stderr, "[host] shutting down\n");
+        exit(0);
+    }
 
+    /* main() finished naturally */
+    thread_join(thread);
+    fprintf(stderr, "[host] main finished\n");
+
+    if (destroy_fn && game) destroy_fn(game);
+
+    /* Process exit cleans up all loaded DLLs */
     return 0;
 }

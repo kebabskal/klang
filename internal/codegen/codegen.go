@@ -261,7 +261,8 @@ type Generator struct {
 	// Raylib detection
 	usesRaylib bool
 	// DLL hot-reload mode
-	DLLMode bool
+	DLLMode          bool
+	dllInsideMain    bool // when true, we're emitting main() in DLL mode
 }
 
 type genericMethodInfo struct {
@@ -1055,20 +1056,20 @@ func (g *Generator) mangledGenericName(className, methodName string, typeMap map
 	return className + "_" + methodName + "_" + g.mangledSuffix(typeMap, typeParams)
 }
 
-// HasHotReloadMethods returns true if the main class has methods beyond main()
-// that could benefit from hot reload (any non-main method).
+// HasHotReloadMethods returns true if the main class has non-main methods
+// that can be hot-reloaded via function pointer indirection.
 func (g *Generator) HasHotReloadMethods() bool {
 	for _, cls := range g.file.Classes {
 		hasMain := false
-		hasOtherMethods := false
+		hasOther := false
 		for _, method := range cls.Methods {
 			if method.Name == "main" && len(method.Params) == 0 {
 				hasMain = true
 			} else {
-				hasOtherMethods = true
+				hasOther = true
 			}
 		}
-		if hasMain && hasOtherMethods {
+		if hasMain && hasOther {
 			return true
 		}
 	}
@@ -1108,49 +1109,40 @@ func (g *Generator) emitDLLHooks(cls *parser.ClassDecl, className string) {
 	g.writeln("#endif")
 	g.writeln("")
 
-	// game_create — allocates the main class instance and runs main() for init
+	// game_create — allocates instance (constructor inits fn pointers)
 	g.writeln("KL_EXPORT void* game_create(void) {")
 	g.indent++
-	g.writeln("%s* _instance = %s_new(%s);", className, className, g.defaultConstructorArgs(cls))
-	g.writeln("%s_main(_instance);", className)
-	g.writeln("return _instance;")
+	g.writeln("return %s_new(%s);", className, g.defaultConstructorArgs(cls))
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
 
-	// Export every non-main method as game_<methodName>(void* self)
-	// This allows the host to call any method by name.
-	var tickMethods []string
+	// game_main — runs the full main() method (called in a thread by host)
+	g.writeln("KL_EXPORT void game_main(void* _self) {")
+	g.indent++
+	g.writeln("%s_main((%s*)_self);", className, className)
+	g.indent--
+	g.writeln("}")
+	g.writeln("")
+
+	// game_patch — updates function pointers to this DLL's implementations
+	g.writeln("KL_EXPORT void game_patch(void* _self) {")
+	g.indent++
+	g.writeln("%s* self = (%s*)_self;", className, className)
 	for _, m := range cls.Methods {
 		if m.Name == "main" {
 			continue
 		}
-		hookName := "game_" + m.Name
-		tickMethods = append(tickMethods, m.Name)
-
-		g.writeln("KL_EXPORT void %s(void* self) {", hookName)
-		g.indent++
-		g.writeln("%s_%s((%s*)self);", className, m.Name, className)
-		g.indent--
-		g.writeln("}")
-		g.writeln("")
-	}
-
-	// game_tick — calls all non-main methods in declaration order.
-	// This is the default "frame" function the host calls each iteration.
-	g.writeln("KL_EXPORT void game_tick(void* self) {")
-	g.indent++
-	for _, name := range tickMethods {
-		g.writeln("%s_%s((%s*)self);", className, name, className)
+		g.writeln("self->_fn_%s = %s_%s;", m.Name, className, m.Name)
 	}
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
 
-	// game_destroy — releases the instance
-	g.writeln("KL_EXPORT void game_destroy(void* self) {")
+	// game_destroy — releases instance
+	g.writeln("KL_EXPORT void game_destroy(void* _self) {")
 	g.indent++
-	g.writeln("if (self) kl_release(self);")
+	g.writeln("if (_self) kl_release(_self);")
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
@@ -1323,6 +1315,22 @@ func (g *Generator) emitStructDefs(prefix string, cls *parser.ClassDecl) {
 			g.writeln("KlWeakSlot* %s;", field.Name)
 		} else {
 			g.writeln("%s %s;", cType, field.Name)
+		}
+	}
+
+	// In DLL mode, add function pointer fields for hot-reloadable methods
+	if g.DLLMode {
+		for _, m := range cls.Methods {
+			if m.Name == "main" {
+				continue
+			}
+			retType := g.returnTypeToC(m.ReturnType, name)
+			// Build parameter type list: (ClassName*, param types...)
+			paramTypes := fmt.Sprintf("struct %s*", name)
+			for _, p := range m.Params {
+				paramTypes += ", " + g.typeToC(p.TypeExpr, name)
+			}
+			g.writeln("%s (*_fn_%s)(%s);", retType, m.Name, paramTypes)
 		}
 	}
 
@@ -1525,6 +1533,16 @@ func (g *Generator) emitConstructor(name string, cls *parser.ClassDecl) {
 		})
 	}
 
+	// In DLL mode, initialize function pointers for hot-reloadable methods
+	if g.DLLMode {
+		for _, m := range cls.Methods {
+			if m.Name == "main" {
+				continue
+			}
+			g.writeln("self->_fn_%s = %s_%s;", m.Name, name, m.Name)
+		}
+	}
+
 	g.writeln("return self;")
 	g.indent--
 	g.writeln("}")
@@ -1545,8 +1563,17 @@ func (g *Generator) emitMethod(className string, method *parser.MethodDecl) {
 		g.localVars[p.Name] = g.typeToC(p.TypeExpr, className)
 	}
 
+	// In DLL mode, track when we're inside main() for function pointer indirection
+	if g.DLLMode && method.Name == "main" {
+		g.dllInsideMain = true
+	}
+
 	if method.Body != nil {
 		g.emitBlock(method.Body, className)
+	}
+
+	if g.DLLMode && method.Name == "main" {
+		g.dllInsideMain = false
 	}
 
 	// Emit scope cleanup at end of method (for non-void methods, return handles it)
@@ -1556,6 +1583,7 @@ func (g *Generator) emitMethod(className string, method *parser.MethodDecl) {
 	g.popScope()
 	g.localVars = nil
 	g.localVarTypes = nil
+
 	g.indent--
 	g.writeln("}")
 	g.writeln("")
@@ -2560,6 +2588,11 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 		return strings.Join(parts, "; ") + "; kl_print_nl()"
 	}
 
+	// Built-in: wait(seconds) → kl_wait(seconds)
+	if ident, ok := e.Callee.(*parser.Ident); ok && ident.Name == "wait" && len(e.Args) == 1 {
+		return fmt.Sprintf("kl_wait(%s)", args[0])
+	}
+
 	// Check if callee is a generic method call
 	if ident, ok := e.Callee.(*parser.Ident); ok {
 		key := g.currentClassName + "_" + ident.Name
@@ -2606,6 +2639,13 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 	// Check if callee is a bare identifier that's a method of current class
 	if ident, ok := e.Callee.(*parser.Ident); ok {
 		if g.isMethod(ident.Name) {
+			// In DLL mode inside main(), call through function pointer for hot reload
+			if g.DLLMode && g.dllInsideMain && ident.Name != "main" {
+				if argStr != "" {
+					return fmt.Sprintf("self->_fn_%s(self, %s)", ident.Name, argStr)
+				}
+				return fmt.Sprintf("self->_fn_%s(self)", ident.Name)
+			}
 			if argStr != "" {
 				return fmt.Sprintf("%s_%s(self, %s)", g.currentClassName, ident.Name, argStr)
 			}
