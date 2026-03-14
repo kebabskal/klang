@@ -1,0 +1,202 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Klang",
+  "scopeName": "source.klang",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#interp-strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#class-declaration" },
+    { "include": "#enum-declaration" },
+    { "include": "#event-declaration" },
+    { "include": "#constructor" },
+    { "include": "#function-definition" },
+    { "include": "#function-call" },
+    { "include": "#operators" },
+    { "include": "#constants" },
+    { "include": "#type-annotation" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.klang"
+    },
+    "strings": {
+      "name": "string.quoted.double.klang",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.klang",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "interp-strings": {
+      "name": "string.interpolated.klang",
+      "begin": "\\$\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.klang",
+          "match": "\\\\."
+        },
+        {
+          "name": "meta.interpolation.klang",
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.interpolation.begin.klang" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.interpolation.end.klang" }
+          },
+          "patterns": [
+            { "include": "#function-call" },
+            { "include": "#identifiers" },
+            { "include": "#operators" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.klang",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.klang",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.klang",
+          "match": "\\b(if|else|for|while|in|return|is|not|and|or)\\b"
+        },
+        {
+          "name": "keyword.other.klang",
+          "match": "\\b(namespace|get|set|this)\\b"
+        },
+        {
+          "name": "storage.type.klang",
+          "match": "\\b(class|enum|event|constructor)\\b"
+        }
+      ]
+    },
+    "types": {
+      "match": "\\b(int|float|bool|string|vec2|vec3|vec4|void|List)\\b",
+      "name": "support.type.klang"
+    },
+    "constants": {
+      "match": "\\b(true|false)\\b",
+      "name": "constant.language.klang"
+    },
+    "class-declaration": {
+      "patterns": [
+        {
+          "comment": "File-scoped or nested class: Name:class or Name:ParentClass {",
+          "match": "^\\s*([A-Z][a-zA-Z0-9_]*)\\s*:\\s*(class)\\b",
+          "captures": {
+            "1": { "name": "entity.name.type.class.klang" },
+            "2": { "name": "storage.type.klang" }
+          }
+        },
+        {
+          "comment": "Inheritance: Name:ParentClass {",
+          "match": "^\\s*([A-Z][a-zA-Z0-9_]*)\\s*:\\s*([A-Z][a-zA-Z0-9_]*)\\s*\\{",
+          "captures": {
+            "1": { "name": "entity.name.type.class.klang" },
+            "2": { "name": "entity.other.inherited-class.klang" }
+          }
+        }
+      ]
+    },
+    "enum-declaration": {
+      "match": "([A-Z][a-zA-Z0-9_]*)\\s*:\\s*(enum)",
+      "captures": {
+        "1": { "name": "entity.name.type.enum.klang" },
+        "2": { "name": "storage.type.klang" }
+      }
+    },
+    "event-declaration": {
+      "match": "([a-z_][a-zA-Z0-9_]*)\\s*:\\s*(event)",
+      "captures": {
+        "1": { "name": "variable.other.event.klang" },
+        "2": { "name": "storage.type.klang" }
+      }
+    },
+    "constructor": {
+      "match": "\\b(constructor)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.constructor.klang" }
+      }
+    },
+    "function-definition": {
+      "match": "^\\s*([a-z_][a-zA-Z0-9_]*)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.klang" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*\\(",
+      "captures": {
+        "1": { "name": "entity.name.function.klang" }
+      }
+    },
+    "type-annotation": {
+      "comment": "name:Type pattern for field/param declarations",
+      "match": ":\\s*([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "support.type.klang" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.klang",
+          "match": ":=|\\+=|-=|\\*=|/=|=>"
+        },
+        {
+          "name": "punctuation.operator.comparison.klang",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.optional.klang",
+          "match": "\\?\\.?|\\?\\?"
+        },
+        {
+          "name": "keyword.operator.arithmetic.klang",
+          "match": "\\+|-|\\*|/"
+        },
+        {
+          "name": "keyword.operator.pipe.klang",
+          "match": "\\|"
+        },
+        {
+          "name": "punctuation.separator.klang",
+          "match": ":|\\.|,"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.constant.klang",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        },
+        {
+          "name": "variable.other.klang",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    }
+  }
+}
