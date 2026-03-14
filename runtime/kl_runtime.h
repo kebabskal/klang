@@ -7,17 +7,26 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #include <windows.h>
-#else
-  #include <unistd.h>
-#endif
-
-// Standard library headers
+// Standard library headers (kl_vector.h may include raylib.h, which must come before windows.h)
 #include "kl_math.h"
 #include "kl_vector.h"
 #include "kl_random.h"
+
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #ifdef KL_USE_RAYLIB
+    // Avoid Windows API name conflicts with raylib
+    #define NOGDI
+    #define NOUSER
+  #endif
+  #include <windows.h>
+  #ifdef KL_USE_RAYLIB
+    #undef near
+    #undef far
+  #endif
+#else
+  #include <unistd.h>
+#endif
 
 // ============================================================================
 // Memory Management — Refcounted objects with auto-weak cycle prevention

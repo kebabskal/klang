@@ -26,6 +26,7 @@ type ClassDecl struct {
 	Enums      []*EnumDecl
 	Properties []*PropertyDecl
 	Events     []*EventDecl
+
 }
 
 func (c *ClassDecl) nodeTag() {}

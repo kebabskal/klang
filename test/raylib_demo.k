@@ -54,7 +54,7 @@ render() {
 	
 	# render balls
 	for ball in balls {
-		draw_circle_v(ball.position, ball.radius, gray)
+		draw_circle_v(ball.position, ball.radius, white)
 	}
 
 	for i in 10 {
