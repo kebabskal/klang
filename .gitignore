@@ -1,9 +1,6 @@
 # Build artifacts
 build/
 bin/
-kl.exe
-/kl
-kl-lsp.exe
 
 # IDE
 .vscode/
