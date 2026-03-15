@@ -2541,10 +2541,35 @@ func (g *Generator) resolveExprType(expr parser.Expr) string {
 	return ""
 }
 
-// Wrap a value for kl_list_push: primitives need (void*)(intptr_t) cast
+// stripOuterParens removes one layer of surrounding parentheses from a C expression
+// string, to avoid double-parens when embedding in if(...) contexts.
+func stripOuterParens(s string) string {
+	if len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
+		// Verify the parens are matched (not e.g. "(a) + (b)")
+		depth := 0
+		for i, c := range s {
+			if c == '(' {
+				depth++
+			} else if c == ')' {
+				depth--
+			}
+			if depth == 0 && i < len(s)-1 {
+				return s // parens don't wrap the whole expression
+			}
+		}
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// Wrap a value for kl_list_push: primitives need (void*)(intptr_t) cast,
+// and string types need (void*) cast to avoid const-qualifier warnings.
 func (g *Generator) listPushCast(valStr string, cType string) string {
 	if g.isPrimitiveType(cType) {
 		return fmt.Sprintf("(void*)(intptr_t)(%s)", valStr)
+	}
+	if cType == "const char*" {
+		return fmt.Sprintf("(void*)(%s)", valStr)
 	}
 	return valStr
 }
@@ -2653,7 +2678,7 @@ func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.Memb
 		g.indent++
 		emitElemDecl(lambda.Params[0].Name, "_i")
 		if expr := getLambdaExpr(); expr != nil {
-			condStr := g.exprToC(expr)
+			condStr := stripOuterParens(g.exprToC(expr))
 			g.writeln("if (%s) { if (%s->items_are_rc && %s->data[_i]) kl_release(%s->data[_i]); }", condStr, obj, obj, obj)
 			g.writeln("else { %s->data[%s++] = %s->data[_i]; }", obj, dstVar, obj)
 		}
@@ -2673,7 +2698,7 @@ func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.Memb
 		g.indent++
 		emitElemDecl(lambda.Params[0].Name, "_i")
 		if expr := getLambdaExpr(); expr != nil {
-			condStr := g.exprToC(expr)
+			condStr := stripOuterParens(g.exprToC(expr))
 			g.writeln("if (%s) kl_list_push(%s, %s->data[_i]);", condStr, resultVar, obj)
 		}
 		g.indent--
@@ -2710,7 +2735,7 @@ func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.Memb
 		g.indent++
 		emitElemDecl(lambda.Params[0].Name, "_i")
 		if expr := getLambdaExpr(); expr != nil {
-			condStr := g.exprToC(expr)
+			condStr := stripOuterParens(g.exprToC(expr))
 			g.writeln("if (%s) { %s = %s->data[_i]; break; }", condStr, resultVar, obj)
 		}
 		g.indent--
@@ -2726,7 +2751,7 @@ func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.Memb
 		g.indent++
 		emitElemDecl(lambda.Params[0].Name, "_i")
 		if expr := getLambdaExpr(); expr != nil {
-			condStr := g.exprToC(expr)
+			condStr := stripOuterParens(g.exprToC(expr))
 			g.writeln("if (%s) { %s = _i; break; }", condStr, resultVar)
 		}
 		g.indent--
