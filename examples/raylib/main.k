@@ -15,23 +15,30 @@ get_point(t:float, r:float):vec2 {
 }
 
 render() {
-	rl.begin_drawing()
-		rl.clear_background(rl.color(32, 32, 32, 255))
+	with math
+	with rl
 
-		rl.draw_text("Raylib with klang!", 20, 20, 20, rl.color(200, 200, 200, 255))
+	begin_drawing()
+	clear_background(color(32, 32, 32, 255))
 
-		count := 1000
-		for i in count {
-			a := get_point(i * 0.061 + time * 1.5, 500)
-			b := get_point(i * 0.062 + time * 1.5 - 0.1, 250)
-			rl.draw_line_v(
-				a,
-				b,
-				rl.color(220, 220, 220, 255)
-			)
-		}
+	count := 100000
+	for i in count {
+		f := float(i)
+		p := f/count
+		c := int(p * 255)
+
+		draw_line_v(
+			get_point(0.060 * f + time * 1.5, 500.0 + 50.0 * sin(f * 0.1 + f * 0.1)),
+			get_point((0.060 + sin(time * 0.5) * 0.0001) * f + time * 1.5, 450.0 + 50.0 * sin(f * 0.1 + f * 0.1)),
+			color(c, c, c, 20)
+		)
+	}
 		
-		rl.end_drawing()
+	draw_text("100k lines", 20, 22, 20, color(0, 0, 0, 255))
+	draw_text("100k lines", 20, 20, 20, color(200, 200, 200, 255))
+
+	draw_fps(20, 100)
+	end_drawing()
 }
 
 main() {

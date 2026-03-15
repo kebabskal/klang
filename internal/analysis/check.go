@@ -284,7 +284,9 @@ func (d *Document) checkExpr(expr parser.Expr, scope *checkScope) {
 	case *parser.CallExpr:
 		// Check callee (allow unknown bare function calls when with-module active)
 		if ident, ok := e.Callee.(*parser.Ident); ok {
-			if !scope.has(ident.Name) && scope.hasWithModule {
+			if isCastFunc(ident.Name) {
+				// Built-in type cast — skip callee check
+			} else if !scope.has(ident.Name) && scope.hasWithModule {
 				// Likely a with-module function — skip
 			} else {
 				d.checkExpr(e.Callee, scope)
@@ -344,6 +346,17 @@ func (d *Document) checkExpr(expr parser.Expr, scope *checkScope) {
 // checkCallArgs checks that argument types match parameter types for a call.
 func (d *Document) checkCallArgs(call *parser.CallExpr, scope *checkScope) {
 	if d.Gen == nil {
+		return
+	}
+
+	// Built-in type casts require exactly 1 argument
+	if ident, ok := call.Callee.(*parser.Ident); ok && isCastFunc(ident.Name) {
+		if len(call.Args) != 1 {
+			pos := d.exprPos(call.Callee)
+			if pos.Line > 0 {
+				d.addError(pos, fmt.Sprintf("%s() expects exactly 1 argument, got %d", ident.Name, len(call.Args)))
+			}
+		}
 		return
 	}
 
@@ -512,6 +525,12 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 
 	// Bare call: func(...)
 	if ident, ok := call.Callee.(*parser.Ident); ok {
+		// Built-in type cast: int(x), float(x), bool(x), string(x)
+		if isCastFunc(ident.Name) {
+			// Cast accepts any single value — don't constrain the argument type
+			return nil
+		}
+
 		if classes != nil {
 			// Check enclosing class methods first
 			if scope.className != "" {
@@ -648,6 +667,12 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 	case *parser.ThisExpr:
 		return scope.typeOf("this")
 	case *parser.CallExpr:
+		// Type cast: int(x) → int, float(x) → float, etc.
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			if isCastFunc(ident.Name) {
+				return ident.Name
+			}
+		}
 		// Constructor call: ClassName() → type is the class name
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			if scope.typeOf(ident.Name) == "class" {
@@ -819,6 +844,15 @@ func (d *Document) exprPos(expr parser.Expr) parser.Pos {
 		return d.exprPos(e.Operand)
 	}
 	return parser.Pos{}
+}
+
+// isCastFunc returns true if the name is a built-in type cast function.
+func isCastFunc(name string) bool {
+	switch name {
+	case "int", "float", "bool", "string":
+		return true
+	}
+	return false
 }
 
 // typesCompatible checks if actualType can be used where expectedType is required.

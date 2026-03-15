@@ -3088,6 +3088,31 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 	}
 	argStr := strings.Join(args, ", ")
 
+	// Built-in type casts: int(x), float(x), bool(x), string(x)
+	if ident, ok := e.Callee.(*parser.Ident); ok && len(e.Args) == 1 {
+		switch ident.Name {
+		case "int":
+			return fmt.Sprintf("(int)(%s)", args[0])
+		case "float":
+			return fmt.Sprintf("(float)(%s)", args[0])
+		case "bool":
+			return fmt.Sprintf("(bool)(%s)", args[0])
+		case "string":
+			// Convert int/float/bool to string via runtime helpers
+			argType := g.InferCType(e.Args[0])
+			switch argType {
+			case "int":
+				return fmt.Sprintf("kl_int_to_string(%s)", args[0])
+			case "float":
+				return fmt.Sprintf("kl_float_to_string(%s)", args[0])
+			case "bool":
+				return fmt.Sprintf("kl_bool_to_string(%s)", args[0])
+			default:
+				return args[0]
+			}
+		}
+	}
+
 	// Built-in: print with multiple args → kl_print_multi(...)
 	if ident, ok := e.Callee.(*parser.Ident); ok && ident.Name == "print" && len(e.Args) > 1 {
 		parts := make([]string, len(e.Args))
@@ -3861,6 +3886,19 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 	case *parser.UnaryExpr:
 		return g.inferCType(e.Operand)
 	case *parser.CallExpr:
+		// Check if it's a type cast
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			switch ident.Name {
+			case "int":
+				return "int"
+			case "float":
+				return "float"
+			case "bool":
+				return "bool"
+			case "string":
+				return "const char*"
+			}
+		}
 		// Check if it's a value type constructor
 		if ident, ok := e.Callee.(*parser.Ident); ok {
 			switch ident.Name {

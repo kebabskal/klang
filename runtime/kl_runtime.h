@@ -347,6 +347,26 @@ static inline void kl_print_nl(void) { printf("\n"); fflush(stdout); }
 )(x)
 
 // ============================================================================
+// Type casting helpers (to string)
+// ============================================================================
+
+static inline const char* kl_int_to_string(int v) {
+    char* buf = (char*)malloc(32);
+    snprintf(buf, 32, "%d", v);
+    return buf;
+}
+
+static inline const char* kl_float_to_string(float v) {
+    char* buf = (char*)malloc(64);
+    snprintf(buf, 64, "%g", v);
+    return buf;
+}
+
+static inline const char* kl_bool_to_string(bool v) {
+    return v ? "true" : "false";
+}
+
+// ============================================================================
 // Wait / Sleep
 // ============================================================================
 

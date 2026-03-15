@@ -463,6 +463,21 @@ func (d *Document) completeBare(line int) []CompletionItem {
 		}
 	}
 
+	// Built-in type cast functions
+	castFuncs := []struct{ name, detail string }{
+		{"int", "int(value):int"},
+		{"float", "float(value):float"},
+		{"bool", "bool(value):bool"},
+		{"string", "string(value):string"},
+	}
+	for _, c := range castFuncs {
+		items = append(items, CompletionItem{
+			Label:  c.name,
+			Detail: c.detail,
+			Kind:   CompletionKindFunction,
+		})
+	}
+
 	return items
 }
 

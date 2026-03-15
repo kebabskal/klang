@@ -237,6 +237,17 @@ func (d *Document) signatureForBare(funcName string, activeParam int, line int) 
 		}
 	}
 
+	// Check built-in type casts
+	castSigs := map[string]string{
+		"int":    "int(value):int",
+		"float":  "float(value):float",
+		"bool":   "bool(value):bool",
+		"string": "string(value):string",
+	}
+	if sig, ok := castSigs[funcName]; ok {
+		return buildSignatureFromDetail(sig, activeParam)
+	}
+
 	// Check built-in constructors
 	builtins := map[string]string{
 		"vec2": "vec2(x:float, y:float)",

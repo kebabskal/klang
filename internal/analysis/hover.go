@@ -401,6 +401,17 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 		}
 	}
 
+	// Check built-in type casts
+	castSigs := map[string]string{
+		"int":    "int(value):int",
+		"float":  "float(value):float",
+		"bool":   "bool(value):bool",
+		"string": "string(value):string",
+	}
+	if sig, ok := castSigs[name]; ok {
+		return makeHover(sig, "Type cast", tok)
+	}
+
 	// Check built-in constructors
 	builtinCtors := map[string]string{
 		"vec2": "vec2(x:float, y:float):vec2",
