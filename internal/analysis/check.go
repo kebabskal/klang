@@ -433,8 +433,10 @@ func (d *Document) checkMemberExists(member *parser.MemberExpr, scope *checkScop
 	// Built-in value types have known fields — don't check those
 	switch typeName {
 	case "vec2", "vec3", "vec4", "mat4", "quat",
-		"Color", "Rectangle", "Texture2D", "Font", "Sound", "Camera2D", "Camera3D",
 		"int", "float", "string", "bool", "List", "Dictionary":
+		return
+	}
+	if _, ok := BuiltinTypeMembers[typeName]; ok {
 		return
 	}
 
@@ -535,14 +537,15 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 			}
 		}
 
-		// Check built-in constructors
+		// Check built-in constructors (core + vendor)
 		builtinParams := map[string][]string{
-			"vec2":      {"float", "float"},
-			"vec3":      {"float", "float", "float"},
-			"vec4":      {"float", "float", "float", "float"},
-			"quat":      {"float", "float", "float", "float"},
-			"Color":     {"int", "int", "int", "int"},
-			"Rectangle": {"float", "float", "float", "float"},
+			"vec2": {"float", "float"},
+			"vec3": {"float", "float", "float"},
+			"vec4": {"float", "float", "float", "float"},
+			"quat": {"float", "float", "float", "float"},
+		}
+		for k, v := range VendorBuiltinConstructorParams() {
+			builtinParams[k] = v
 		}
 		if params, ok := builtinParams[ident.Name]; ok {
 			return params
@@ -766,22 +769,10 @@ func extractDictTypes(dictType string) (string, string) {
 
 // resolveFieldKlangType looks up the Klang type of a field on a class by name.
 func (d *Document) resolveFieldKlangType(className, fieldName string) string {
-	// Built-in value type fields
-	switch className {
-	case "vec2", "vec3", "vec4", "quat":
-		switch fieldName {
-		case "x", "y", "z", "w":
-			return "float"
-		}
-	case "Color":
-		switch fieldName {
-		case "r", "g", "b", "a":
-			return "int"
-		}
-	case "Rectangle":
-		switch fieldName {
-		case "x", "y", "width", "height":
-			return "float"
+	// Built-in value type fields (core + vendor via BuiltinTypeFieldTypes)
+	if fields, ok := BuiltinTypeFieldTypes[className]; ok {
+		if ft, ok := fields[fieldName]; ok {
+			return ft
 		}
 	}
 	// Look up in class definitions
@@ -953,14 +944,17 @@ func (d *Document) resolveEventEmitParamTypes(eventName string) []string {
 }
 
 // builtinIdents are identifiers that are always valid (constructors, globals, etc.)
+// Vendor-contributed identifiers are appended in init().
 var builtinIdents = []string{
 	"int", "float", "string", "bool", "void",
 	"vec2", "vec3", "vec4", "mat4", "quat",
-	"Color", "Rectangle", "Texture2D", "Font", "Sound", "Camera2D", "Camera3D",
 	"List", "Dictionary", "Random",
 	"print", "println", "str", "len", "append", "remove",
 	"true", "false", "nil", "null", "this", "self",
-	"math", "io", "rl", "os",
-	"Colors", "Key", "Mouse", "Gamepad",
+	"math", "io", "os",
 	"not",
+}
+
+func init() {
+	builtinIdents = append(builtinIdents, VendorBuiltinIdents()...)
 }

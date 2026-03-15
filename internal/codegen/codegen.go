@@ -15,6 +15,8 @@ type scopeVar struct {
 
 // --- Standard library module mappings ---
 
+// stdlibModuleFuncs maps module.func → C function name.
+// Core modules are defined here; vendor libs are merged via mergeVendors().
 var stdlibModuleFuncs = map[string]map[string]string{
 	"math": {
 		"sin":     "sinf",
@@ -48,95 +50,6 @@ var stdlibModuleFuncs = map[string]map[string]string{
 		"dir_exists":  "kl_io_dir_exists",
 		"list_dir":    "kl_io_list_dir",
 	},
-	"rl": {
-		// Window management
-		"init_window":          "InitWindow",
-		"close_window":         "CloseWindow",
-		"window_should_close":  "WindowShouldClose",
-		"set_target_fps":       "SetTargetFPS",
-		"get_screen_width":     "GetScreenWidth",
-		"get_screen_height":    "GetScreenHeight",
-		"get_screen_size":      "kl_get_screen_size",
-		"toggle_fullscreen":    "ToggleFullscreen",
-		"is_window_resized":    "IsWindowResized",
-		"set_window_title":     "SetWindowTitle",
-		"set_window_size":      "SetWindowSize",
-		"get_frame_time":       "GetFrameTime",
-		"get_time":             "GetTime",
-		"get_fps":              "GetFPS",
-		// Drawing
-		"begin_drawing":        "BeginDrawing",
-		"end_drawing":          "EndDrawing",
-		"clear_background":     "ClearBackground",
-		"begin_mode_2d":        "BeginMode2D",
-		"end_mode_2d":          "EndMode2D",
-		"begin_mode_3d":        "BeginMode3D",
-		"end_mode_3d":          "EndMode3D",
-		// Shapes
-		"draw_line":            "DrawLine",
-		"draw_line_v":          "kl_draw_line_v",
-		"draw_circle":          "DrawCircle",
-		"draw_circle_v":        "kl_draw_circle_v",
-		"draw_rectangle":       "DrawRectangle",
-		"draw_rectangle_v":     "kl_draw_rectangle_v",
-		"draw_rectangle_rec":   "DrawRectangleRec",
-		"draw_rectangle_lines": "DrawRectangleLines",
-		"draw_triangle":        "DrawTriangle",
-		// Text
-		"draw_text":            "DrawText",
-		"draw_text_ex":         "DrawTextEx",
-		"measure_text":         "MeasureText",
-		"load_font":            "LoadFont",
-		"unload_font":          "UnloadFont",
-		// Textures
-		"load_texture":         "LoadTexture",
-		"unload_texture":       "UnloadTexture",
-		"draw_texture":         "DrawTexture",
-		"draw_texture_v":       "kl_draw_texture_v",
-		"draw_texture_ex":      "DrawTextureEx",
-		"draw_texture_rec":     "DrawTextureRec",
-		"draw_texture_pro":     "kl_draw_texture_pro",
-		// Input - keyboard
-		"is_key_pressed":       "IsKeyPressed",
-		"is_key_down":          "IsKeyDown",
-		"is_key_released":      "IsKeyReleased",
-		"is_key_up":            "IsKeyUp",
-		// Input - mouse
-		"is_mouse_button_pressed": "IsMouseButtonPressed",
-		"is_mouse_button_down":    "IsMouseButtonDown",
-		"is_mouse_button_released":"IsMouseButtonReleased",
-		"get_mouse_position":      "kl_get_mouse_position",
-		"get_mouse_x":             "GetMouseX",
-		"get_mouse_y":             "GetMouseY",
-		"get_mouse_wheel_move":    "GetMouseWheelMove",
-		// Input - gamepad
-		"is_gamepad_available":       "IsGamepadAvailable",
-		"is_gamepad_button_pressed":  "IsGamepadButtonPressed",
-		"is_gamepad_button_down":     "IsGamepadButtonDown",
-		"get_gamepad_axis_movement":  "GetGamepadAxisMovement",
-		// Audio
-		"init_audio_device":    "InitAudioDevice",
-		"close_audio_device":   "CloseAudioDevice",
-		"load_sound":           "LoadSound",
-		"unload_sound":         "UnloadSound",
-		"play_sound":           "PlaySound",
-		"stop_sound":           "StopSound",
-		"load_music_stream":    "LoadMusicStream",
-		"unload_music_stream":  "UnloadMusicStream",
-		"play_music_stream":    "PlayMusicStream",
-		"stop_music_stream":    "StopMusicStream",
-		"update_music_stream":  "UpdateMusicStream",
-		"set_master_volume":    "SetMasterVolume",
-		// Misc
-		"draw_fps":             "DrawFPS",
-		"set_exit_key":         "SetExitKey",
-		// Helpers
-		"color":               "kl_color",
-		"color_rgb":           "kl_color_rgb",
-		"rect":                "kl_rect",
-		"camera2d":            "kl_camera2d",
-		"camera3d":            "kl_camera3d",
-	},
 }
 
 var stdlibModuleConstants = map[string]map[string]string{
@@ -151,86 +64,13 @@ var stdlibModuleConstants = map[string]map[string]string{
 	},
 }
 
-// stdlibConstNamespaces maps namespace.Constant → C constant (e.g., Colors.Red → RED)
-var stdlibConstNamespaces = map[string]map[string]string{
-	"Colors": {
-		"LightGray":  "LIGHTGRAY",
-		"Gray":       "GRAY",
-		"DarkGray":   "DARKGRAY",
-		"Yellow":     "YELLOW",
-		"Gold":       "GOLD",
-		"Orange":     "ORANGE",
-		"Pink":       "PINK",
-		"Red":        "RED",
-		"Maroon":     "MAROON",
-		"Green":      "GREEN",
-		"Lime":       "LIME",
-		"DarkGreen":  "DARKGREEN",
-		"SkyBlue":    "SKYBLUE",
-		"Blue":       "BLUE",
-		"DarkBlue":   "DARKBLUE",
-		"Purple":     "PURPLE",
-		"Violet":     "VIOLET",
-		"DarkPurple": "DARKPURPLE",
-		"Beige":      "BEIGE",
-		"Brown":      "BROWN",
-		"DarkBrown":  "DARKBROWN",
-		"White":      "WHITE",
-		"Black":      "BLACK",
-		"Blank":      "BLANK",
-		"Magenta":    "MAGENTA",
-		"RayWhite":   "RAYWHITE",
-	},
-	"Key": {
-		"Space":      "KEY_SPACE",
-		"Escape":     "KEY_ESCAPE",
-		"Enter":      "KEY_ENTER",
-		"Tab":        "KEY_TAB",
-		"Backspace":  "KEY_BACKSPACE",
-		"Delete":     "KEY_DELETE",
-		"Right":      "KEY_RIGHT",
-		"Left":       "KEY_LEFT",
-		"Down":       "KEY_DOWN",
-		"Up":         "KEY_UP",
-		"LeftShift":  "KEY_LEFT_SHIFT",
-		"LeftCtrl":   "KEY_LEFT_CONTROL",
-		"LeftAlt":    "KEY_LEFT_ALT",
-		"RightShift": "KEY_RIGHT_SHIFT",
-		"RightCtrl":  "KEY_RIGHT_CONTROL",
-		"RightAlt":   "KEY_RIGHT_ALT",
-		"A": "KEY_A", "B": "KEY_B", "C": "KEY_C", "D": "KEY_D",
-		"E": "KEY_E", "F": "KEY_F", "G": "KEY_G", "H": "KEY_H",
-		"I": "KEY_I", "J": "KEY_J", "K": "KEY_K", "L": "KEY_L",
-		"M": "KEY_M", "N": "KEY_N", "O": "KEY_O", "P": "KEY_P",
-		"Q": "KEY_Q", "R": "KEY_R", "S": "KEY_S", "T": "KEY_T",
-		"U": "KEY_U", "V": "KEY_V", "W": "KEY_W", "X": "KEY_X",
-		"Y": "KEY_Y", "Z": "KEY_Z",
-		"F1": "KEY_F1", "F2": "KEY_F2", "F3": "KEY_F3", "F4": "KEY_F4",
-		"F5": "KEY_F5", "F6": "KEY_F6", "F7": "KEY_F7", "F8": "KEY_F8",
-		"F9": "KEY_F9", "F10": "KEY_F10", "F11": "KEY_F11", "F12": "KEY_F12",
-		"Zero": "KEY_ZERO", "One": "KEY_ONE", "Two": "KEY_TWO",
-		"Three": "KEY_THREE", "Four": "KEY_FOUR", "Five": "KEY_FIVE",
-		"Six": "KEY_SIX", "Seven": "KEY_SEVEN", "Eight": "KEY_EIGHT", "Nine": "KEY_NINE",
-	},
-	"Mouse": {
-		"Left":    "MOUSE_BUTTON_LEFT",
-		"Right":   "MOUSE_BUTTON_RIGHT",
-		"Middle":  "MOUSE_BUTTON_MIDDLE",
-	},
-	"Gamepad": {
-		"LeftStickX":  "GAMEPAD_AXIS_LEFT_X",
-		"LeftStickY":  "GAMEPAD_AXIS_LEFT_Y",
-		"RightStickX": "GAMEPAD_AXIS_RIGHT_X",
-		"RightStickY": "GAMEPAD_AXIS_RIGHT_Y",
-		"LeftTrigger":  "GAMEPAD_AXIS_LEFT_TRIGGER",
-		"RightTrigger": "GAMEPAD_AXIS_RIGHT_TRIGGER",
-	},
-}
+// stdlibConstNamespaces maps namespace.Constant → C constant.
+// Vendor libs contribute their namespaces via RegisterVendorCodegen.
+var stdlibConstNamespaces = map[string]map[string]string{}
 
 var stdlibModules = map[string]bool{
 	"math": true,
 	"io":   true,
-	"rl":   true,
 }
 
 type Generator struct {
@@ -274,6 +114,7 @@ type genericMethodInfo struct {
 }
 
 func New(file *parser.File) *Generator {
+	mergeVendors()
 	g := &Generator{
 		file:           file,
 		files:          []*parser.File{file},
@@ -292,6 +133,7 @@ func NewMulti(files []*parser.File) *Generator {
 	if len(files) == 0 {
 		return New(&parser.File{})
 	}
+	mergeVendors()
 	g := &Generator{
 		file:           files[0],
 		files:          files,
@@ -673,7 +515,7 @@ func (g *Generator) scanStmtsForRaylib(stmts []parser.Stmt) bool {
 func (g *Generator) scanStmtForRaylib(stmt parser.Stmt) bool {
 	switch s := stmt.(type) {
 	case *parser.WithStmt:
-		if s.Module == "rl" {
+		if vendorDetectModules[s.Module] {
 			return true
 		}
 		if s.Body != nil {
@@ -728,10 +570,9 @@ func (g *Generator) scanExprForRaylib(expr parser.Expr) bool {
 	}
 	switch e := expr.(type) {
 	case *parser.MemberExpr:
-		// Check for rl.xxx, Colors.xxx, Key.xxx, Mouse.xxx
+		// Check for vendor module/namespace references (e.g. rl.xxx, Colors.xxx)
 		if ident, ok := e.Object.(*parser.Ident); ok {
-			switch ident.Name {
-			case "rl", "Colors", "Key", "Mouse", "Gamepad":
+			if vendorDetectIdents[ident.Name] {
 				return true
 			}
 		}
@@ -2321,9 +2162,10 @@ func (g *Generator) isPrimitiveType(cType string) bool {
 func (g *Generator) isValueType(cType string) bool {
 	switch cType {
 	case "vec2", "vec3", "vec4", "mat4", "quat",
-		"Color", "Rectangle", "Camera2D", "Camera3D",
-		"Texture2D", "Font", "Sound", "Music",
 		"KlRandom":
+		return true
+	}
+	if vendorValueTypes[cType] {
 		return true
 	}
 	return false
@@ -2407,48 +2249,10 @@ func (g *Generator) inferVectorFuncReturnType(name string) string {
 	return ""
 }
 
-// inferRlReturnType returns the C type for raylib wrapper function return values
+// inferRlReturnType returns the C type for vendor module function return values
 func (g *Generator) inferRlReturnType(funcName string) string {
-	switch funcName {
-	// bool returns
-	case "window_should_close", "is_window_resized",
-		"is_key_pressed", "is_key_down", "is_key_released", "is_key_up",
-		"is_mouse_button_pressed", "is_mouse_button_down", "is_mouse_button_released",
-		"is_gamepad_available", "is_gamepad_button_pressed", "is_gamepad_button_down":
-		return "bool"
-	// int returns
-	case "get_screen_width", "get_screen_height", "get_fps", "measure_text",
-		"get_mouse_x", "get_mouse_y":
-		return "int"
-	// float returns
-	case "get_frame_time", "get_time", "get_mouse_wheel_move", "get_gamepad_axis_movement":
-		return "float"
-	// vec2 returns
-	case "get_mouse_position", "get_screen_size":
-		return "vec2"
-	// Texture2D returns
-	case "load_texture":
-		return "Texture2D"
-	// Font returns
-	case "load_font":
-		return "Font"
-	// Sound returns
-	case "load_sound":
-		return "Sound"
-	// Music returns
-	case "load_music_stream":
-		return "Music"
-	// Color returns
-	case "color", "color_rgb":
-		return "Color"
-	// Rectangle returns
-	case "rect":
-		return "Rectangle"
-	// Camera returns
-	case "camera2d":
-		return "Camera2D"
-	case "camera3d":
-		return "Camera3D"
+	if rt, ok := vendorReturnTypes[funcName]; ok {
+		return rt
 	}
 	// void by default (drawing functions etc.)
 	return "int"
@@ -2481,18 +2285,18 @@ func (g *Generator) resolveExprType(expr parser.Expr) string {
 				return "vec4"
 			case "quat":
 				return "quat"
-			case "Color":
-				return "Color"
-			case "Rectangle":
-				return "Rectangle"
 			case "Random":
 				return "KlRandom"
 			}
+			// Check vendor-contributed type mappings
+			if cType, ok := vendorTypeMap[ident.Name]; ok {
+				return cType
+			}
 		}
-		// Check rl module function calls for return type
+		// Check vendor module function calls for return type
 		if member, ok := call.Callee.(*parser.MemberExpr); ok {
 			if ident, ok := member.Object.(*parser.Ident); ok {
-				if ident.Name == "rl" {
+				if vendorDetectModules[ident.Name] {
 					return g.inferRlReturnType(member.Field)
 				}
 			}
@@ -3366,12 +3170,12 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 			return fmt.Sprintf("(vec4){%s}", argStr)
 		case "quat":
 			return fmt.Sprintf("(quat){%s}", argStr)
-		case "Color":
-			return fmt.Sprintf("(Color){%s}", argStr)
-		case "Rectangle":
-			return fmt.Sprintf("(Rectangle){%s}", argStr)
 		case "Random":
 			return fmt.Sprintf("kl_random_new(%s)", argStr)
+		}
+		// Check vendor-contributed struct literal constructors (e.g. Color, Rectangle)
+		if vendorConstructorTypes[ident.Name] {
+			return fmt.Sprintf("(%s){%s}", ident.Name, argStr)
 		}
 		// Check if it's a class constructor: Ball() → Main_Ball_new()
 		fullName := g.resolveFullClassName(ident.Name, g.currentClassName)
@@ -3901,25 +3705,13 @@ func (g *Generator) simpleTypeToCWithContext(name, context string) string {
 		return "mat4"
 	case "quat":
 		return "quat"
-	case "Color":
-		return "Color"
-	case "Rectangle":
-		return "Rectangle"
-	case "Texture2D", "Texture":
-		return "Texture2D"
-	case "Font":
-		return "Font"
-	case "Sound":
-		return "Sound"
-	case "Music":
-		return "Music"
-	case "Camera2D":
-		return "Camera2D"
-	case "Camera3D":
-		return "Camera3D"
 	case "Random":
 		return "KlRandom"
 	default:
+		// Check vendor-contributed type mappings
+		if cType, ok := vendorTypeMap[name]; ok {
+			return cType
+		}
 		// Try to resolve as a nested class
 		if context != "" {
 			full := context + "_" + name
@@ -4080,12 +3872,12 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 				return "vec4"
 			case "quat":
 				return "quat"
-			case "Color":
-				return "Color"
-			case "Rectangle":
-				return "Rectangle"
 			case "Random":
 				return "KlRandom"
+			}
+			// Check vendor-contributed type mappings
+			if cType, ok := vendorTypeMap[ident.Name]; ok {
+				return cType
 			}
 			// Check if it's a known vector/math global function
 			if rt := g.inferVectorFuncReturnType(ident.Name); rt != "" {
@@ -4096,7 +3888,7 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 				mod := g.withModules[i]
 				if funcs, ok := stdlibModuleFuncs[mod]; ok {
 					if _, ok := funcs[ident.Name]; ok {
-						if mod == "rl" {
+						if vendorDetectModules[mod] {
 							return g.inferRlReturnType(ident.Name)
 						}
 						if mod == "math" {
@@ -4137,7 +3929,7 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 								return "KlList*"
 							}
 						}
-						if ident.Name == "rl" {
+						if vendorDetectModules[ident.Name] {
 							return g.inferRlReturnType(member.Field)
 						}
 					}

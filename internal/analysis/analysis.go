@@ -9,6 +9,13 @@ import (
 	"github.com/klang-lang/klang/internal/parser"
 )
 
+// vendorCTypes is populated from vendor libs at init time for fast C-type → Klang lookups.
+var vendorCTypes map[string]string
+
+func init() {
+	vendorCTypes = VendorCTypeMap()
+}
+
 // Document represents a single analyzed .k file.
 type Document struct {
 	URI    string
@@ -197,20 +204,10 @@ func CTypeToKlang(cType string) string {
 		return "mat4"
 	case "quat":
 		return "quat"
-	case "Color":
-		return "Color"
-	case "Rectangle":
-		return "Rectangle"
-	case "Texture2D":
-		return "Texture2D"
-	case "Font":
-		return "Font"
-	case "Sound":
-		return "Sound"
-	case "Camera2D":
-		return "Camera2D"
-	case "Camera3D":
-		return "Camera3D"
+	}
+	// Check vendor-contributed type mappings
+	if klType, ok := vendorCTypes[cType]; ok {
+		return klType
 	}
 	// ClassName* → ClassName
 	if strings.HasSuffix(cType, "*") {

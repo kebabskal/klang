@@ -238,12 +238,13 @@ func (d *Document) signatureForBare(funcName string, activeParam int, line int) 
 
 	// Check built-in constructors
 	builtins := map[string]string{
-		"vec2":      "vec2(x:float, y:float)",
-		"vec3":      "vec3(x:float, y:float, z:float)",
-		"vec4":      "vec4(x:float, y:float, z:float, w:float)",
-		"quat":      "quat(x:float, y:float, z:float, w:float)",
-		"Color":     "Color(r:int, g:int, b:int, a:int)",
-		"Rectangle": "Rectangle(x:float, y:float, width:float, height:float)",
+		"vec2": "vec2(x:float, y:float)",
+		"vec3": "vec3(x:float, y:float, z:float)",
+		"vec4": "vec4(x:float, y:float, z:float, w:float)",
+		"quat": "quat(x:float, y:float, z:float, w:float)",
+	}
+	for k, v := range VendorBuiltinConstructors() {
+		builtins[k] = v
 	}
 	if sig, ok := builtins[funcName]; ok {
 		return buildSignatureFromDetail(sig, activeParam)
