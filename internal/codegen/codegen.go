@@ -4356,6 +4356,47 @@ func (g *Generator) InferCType(expr parser.Expr) (result string) {
 	return g.inferCType(expr)
 }
 
+// InferKlangType infers the Klang-level type of an expression, preserving generic type args.
+// e.g. Stack<string>() → "Stack<string>", vec2(1,2) → "vec2"
+func (g *Generator) InferKlangType(expr parser.Expr) (result string) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = ""
+		}
+	}()
+	// Check if it's a generic class constructor call — return Klang generic type directly
+	if call, ok := expr.(*parser.CallExpr); ok {
+		if ident, ok := call.Callee.(*parser.Ident); ok && len(call.TypeArgs) > 0 {
+			// Look up the class in g.classes to verify it exists and has type params
+			fullName := g.resolveFullClassName(ident.Name, g.currentClassName)
+			if cls, ok := g.classes[fullName]; ok && len(cls.TypeParams) > 0 {
+				var args []string
+				for _, ta := range call.TypeArgs {
+					args = append(args, typeExprToKlangStr(ta))
+				}
+				return ident.Name + "<" + strings.Join(args, ", ") + ">"
+			}
+		}
+	}
+	// Fall back to C type → Klang conversion
+	return ""
+}
+
+// typeExprToKlangStr converts a TypeExpr to its Klang string representation.
+func typeExprToKlangStr(te parser.TypeExpr) string {
+	switch t := te.(type) {
+	case *parser.SimpleType:
+		return t.Name
+	case *parser.GenericType:
+		var args []string
+		for _, a := range t.TypeArgs {
+			args = append(args, typeExprToKlangStr(a))
+		}
+		return t.Name + "<" + strings.Join(args, ", ") + ">"
+	}
+	return ""
+}
+
 // FindFieldInClass checks if a class (or its parents) has a field with the given name.
 func (g *Generator) FindFieldInClass(cls *parser.ClassDecl, name string) bool {
 	return g.findFieldInClass(cls, name)

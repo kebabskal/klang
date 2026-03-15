@@ -324,8 +324,12 @@ func (d *Document) collectLocalsFromBlock(block *parser.Block, line int, locals 
 				ktype := typeExprToString(s.TypeExpr)
 				// For inferred types (:=), use codegen to resolve the type from the value
 				if ktype == "" && s.Value != nil && d.Gen != nil {
-					cType := d.Gen.InferCType(s.Value)
-					ktype = CTypeToKlang(cType)
+					// Try Klang-level inference first (preserves generics like Stack<string>)
+					ktype = d.Gen.InferKlangType(s.Value)
+					if ktype == "" {
+						cType := d.Gen.InferCType(s.Value)
+						ktype = CTypeToKlang(cType)
+					}
 				}
 				*locals = append(*locals, LocalVar{Name: s.Name, KType: ktype, Pos: s.Pos})
 			}

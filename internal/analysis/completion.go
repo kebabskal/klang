@@ -295,11 +295,15 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		return nil
 	}
 
+	// Build type parameter substitution map for generic classes
+	sub := buildTypeParamSub(typeName, cls)
+
 	for _, f := range cls.Fields {
 		ktype := typeExprToString(f.TypeExpr)
 		if ktype == "" && f.Inferred {
 			ktype = "(inferred)"
 		}
+		ktype = applyTypeParamSub(ktype, sub)
 		items = append(items, CompletionItem{
 			Label:  f.Name,
 			Detail: ktype,
@@ -307,7 +311,7 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		})
 	}
 	for _, m := range cls.Methods {
-		detail := formatMethodSignature(m)
+		detail := applyTypeParamSub(formatMethodSignature(m), sub)
 		items = append(items, CompletionItem{
 			Label:  m.Name,
 			Detail: detail,
@@ -315,7 +319,7 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		})
 	}
 	for _, p := range cls.Properties {
-		ktype := typeExprToString(p.TypeExpr)
+		ktype := applyTypeParamSub(typeExprToString(p.TypeExpr), sub)
 		items = append(items, CompletionItem{
 			Label:  p.Name,
 			Detail: ktype,

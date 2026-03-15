@@ -158,12 +158,16 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 		return nil
 	}
 
+	// Build type parameter substitution map from typeName (e.g. "Stack<string>" → {T: string})
+	sub := buildTypeParamSub(typeName, cls)
+
 	for _, f := range cls.Fields {
 		if f.Name == member {
 			ktype := typeExprToString(f.TypeExpr)
 			if ktype == "" {
 				ktype = "(inferred)"
 			}
+			ktype = applyTypeParamSub(ktype, sub)
 			return &HoverResult{
 				Content: "```klang\n" + member + ":" + ktype + "\n```\nField on `" + typeName + "`",
 				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
@@ -172,7 +176,7 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 	}
 	for _, m := range cls.Methods {
 		if m.Name == member {
-			sig := formatMethodSignature(m)
+			sig := applyTypeParamSub(formatMethodSignature(m), sub)
 			return &HoverResult{
 				Content: "```klang\n" + sig + "\n```\nMethod on `" + typeName + "`",
 				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
@@ -181,7 +185,7 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 	}
 	for _, p := range cls.Properties {
 		if p.Name == member {
-			ktype := typeExprToString(p.TypeExpr)
+			ktype := applyTypeParamSub(typeExprToString(p.TypeExpr), sub)
 			return &HoverResult{
 				Content: "```klang\n" + member + ":" + ktype + "\n```\nProperty on `" + typeName + "`",
 				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
@@ -202,6 +206,50 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 		return d.hoverClassMember(cls.Parent, member, classes, tok)
 	}
 	return nil
+}
+
+// buildTypeParamSub builds a substitution map from a concrete type name and its class declaration.
+// e.g. typeName="Stack<string>", cls.TypeParams=["T"] → map{"T": "string"}
+// e.g. typeName="Pair<string, int>", cls.TypeParams=["A","B"] → map{"A": "string", "B": "int"}
+func buildTypeParamSub(typeName string, cls *parser.ClassDecl) map[string]string {
+	if len(cls.TypeParams) == 0 {
+		return nil
+	}
+	idx := strings.Index(typeName, "<")
+	if idx < 0 {
+		return nil
+	}
+	inner := typeName[idx+1 : len(typeName)-1]
+	args := splitTypeArgs(inner)
+	if len(args) != len(cls.TypeParams) {
+		return nil
+	}
+	sub := make(map[string]string, len(cls.TypeParams))
+	for i, tp := range cls.TypeParams {
+		sub[tp] = args[i]
+	}
+	return sub
+}
+
+// applyTypeParamSub replaces type parameter names in a signature string with concrete types.
+// It matches type params at type positions: after ':', after ')', in '<>', and standalone.
+func applyTypeParamSub(sig string, sub map[string]string) string {
+	if len(sub) == 0 {
+		return sig
+	}
+	var oldnew []string
+	for tp, concrete := range sub {
+		// Replace in various positions where type names appear
+		oldnew = append(oldnew,
+			":"+tp, ":"+concrete, // param types: "item:T" → "item:string"
+			"("+tp+")", "("+concrete+")", // wrapped: "(T)" → "(string)"
+			"<"+tp+">", "<"+concrete+">", // generic args: "<T>" → "<string>"
+			"):"+tp, "):"+concrete, // return types: "):T" → "):string"
+			", "+tp+",", ", "+concrete+",", // in lists
+			", "+tp+")", ", "+concrete+")", // last in list
+		)
+	}
+	return strings.NewReplacer(oldnew...).Replace(sig)
 }
 
 func (d *Document) hoverBuiltinMember(typeName, member string, tok *lexer.Token) *HoverResult {
@@ -479,6 +527,18 @@ func (d *Document) resolveIdentType(name string, line int) string {
 func (d *Document) findClass(name string, classes map[string]*parser.ClassDecl) *parser.ClassDecl {
 	if cls, ok := classes[name]; ok {
 		return cls
+	}
+	// Strip generic type args: "Stack<string>" → "Stack"
+	if idx := strings.Index(name, "<"); idx > 0 {
+		baseName := name[:idx]
+		if cls, ok := classes[baseName]; ok {
+			return cls
+		}
+		for fullName, cls := range classes {
+			if strings.HasSuffix(fullName, "_"+baseName) {
+				return cls
+			}
+		}
 	}
 	// Try suffix match
 	for fullName, cls := range classes {

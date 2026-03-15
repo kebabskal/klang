@@ -843,11 +843,13 @@ func (d *Document) resolveFieldKlangType(className, fieldName string) string {
 	if cls == nil {
 		return ""
 	}
+	// Build type parameter substitution for generic classes
+	sub := buildTypeParamSub(className, cls)
 	for _, f := range cls.Fields {
 		if f.Name == fieldName {
 			ktype := typeExprToString(f.TypeExpr)
 			if ktype != "" {
-				return ktype
+				return applyTypeParamSub(ktype, sub)
 			}
 			// Fallback to codegen
 			return d.ResolveFieldType(f, className)
@@ -856,7 +858,7 @@ func (d *Document) resolveFieldKlangType(className, fieldName string) string {
 	// Check properties
 	for _, prop := range cls.Properties {
 		if prop.Name == fieldName {
-			return typeExprToString(prop.TypeExpr)
+			return applyTypeParamSub(typeExprToString(prop.TypeExpr), sub)
 		}
 	}
 	// Check parent

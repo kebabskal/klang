@@ -185,7 +185,16 @@ func (d *Document) findMethodSignature(typeName, methodName string, activeParam 
 
 	for _, m := range cls.Methods {
 		if m.Name == methodName {
-			return buildSignatureFromMethod(m, activeParam)
+			result := buildSignatureFromMethod(m, activeParam)
+			// Substitute generic type params if the class is generic
+			sub := buildTypeParamSub(typeName, cls)
+			if sub != nil && result != nil {
+				result.Label = applyTypeParamSub(result.Label, sub)
+				for i := range result.Parameters {
+					result.Parameters[i].KType = applyTypeParamSub(result.Parameters[i].KType, sub)
+				}
+			}
+			return result
 		}
 	}
 
