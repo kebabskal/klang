@@ -39,6 +39,52 @@ type ClassDecl struct {
 
 func (c *ClassDecl) nodeTag() {}
 
+// FindField returns the field with the given name, or nil.
+func (c *ClassDecl) FindField(name string) *FieldDecl {
+	for _, f := range c.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// FindMethod returns the method with the given name, or nil.
+func (c *ClassDecl) FindMethod(name string) *MethodDecl {
+	for _, m := range c.Methods {
+		if m.Name == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// FindProperty returns the property with the given name, or nil.
+func (c *ClassDecl) FindProperty(name string) *PropertyDecl {
+	for _, p := range c.Properties {
+		if p.Name == name {
+			return p
+		}
+	}
+	return nil
+}
+
+// FindEvent returns the event with the given name, or nil.
+func (c *ClassDecl) FindEvent(name string) *EventDecl {
+	for _, ev := range c.Events {
+		if ev.Name == name {
+			return ev
+		}
+	}
+	return nil
+}
+
+// HasMember returns true if the class has a field, method, property, or event with the given name.
+func (c *ClassDecl) HasMember(name string) bool {
+	return c.FindField(name) != nil || c.FindMethod(name) != nil ||
+		c.FindProperty(name) != nil || c.FindEvent(name) != nil
+}
+
 type FieldDecl struct {
 	Name     string
 	TypeExpr TypeExpr // nil if inferred

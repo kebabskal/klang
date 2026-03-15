@@ -120,7 +120,7 @@ func (d *Document) signatureForMember(objName, methodName string, activeParam in
 	cls, _ := d.FindEnclosingClass(line)
 	if cls != nil && !strings.Contains(objName, ".") {
 		// Check if objName is an event on the current class
-		if ev := d.findEventByName(cls, objName); ev != nil {
+		if ev := cls.FindEvent(objName); ev != nil {
 			if methodName == "emit" {
 				return buildEventEmitSignature(ev, activeParam)
 			}
@@ -138,10 +138,8 @@ func (d *Document) signatureForMember(objName, methodName string, activeParam in
 
 	// Check if methodName is an event on the resolved type (implicit connect: obj.event(handler))
 	if resolvedCls := d.findClass(typeName, classes); resolvedCls != nil {
-		for _, ev := range resolvedCls.Events {
-			if ev.Name == methodName {
-				return buildEventConnectSignature(ev, activeParam)
-			}
+		if ev := resolvedCls.FindEvent(methodName); ev != nil {
+			return buildEventConnectSignature(ev, activeParam)
 		}
 	}
 
@@ -183,19 +181,16 @@ func (d *Document) findMethodSignature(typeName, methodName string, activeParam 
 		return nil
 	}
 
-	for _, m := range cls.Methods {
-		if m.Name == methodName {
-			result := buildSignatureFromMethod(m, activeParam)
-			// Substitute generic type params if the class is generic
+	if m := cls.FindMethod(methodName); m != nil {
+		result := buildSignatureFromMethod(m, activeParam)
+		if result != nil && len(cls.TypeParams) > 0 {
 			sub := buildTypeParamSub(typeName, cls)
-			if sub != nil && result != nil {
-				result.Label = applyTypeParamSub(result.Label, sub)
-				for i := range result.Parameters {
-					result.Parameters[i].KType = applyTypeParamSub(result.Parameters[i].KType, sub)
-				}
+			result.Label = applyTypeParamSub(result.Label, sub)
+			for i := range result.Parameters {
+				result.Parameters[i].KType = applyTypeParamSub(result.Parameters[i].KType, sub)
 			}
-			return result
 		}
+		return result
 	}
 
 	// Check parent
@@ -226,10 +221,8 @@ func (d *Document) signatureForBare(funcName string, activeParam int, line int) 
 
 	// Check class methods (calling own method)
 	if cls != nil {
-		for _, m := range cls.Methods {
-			if m.Name == funcName {
-				return buildSignatureFromMethod(m, activeParam)
-			}
+		if m := cls.FindMethod(funcName); m != nil {
+			return buildSignatureFromMethod(m, activeParam)
 		}
 	}
 

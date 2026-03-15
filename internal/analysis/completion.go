@@ -195,19 +195,17 @@ func (d *Document) completeMemberAccess(objName string, line int) []CompletionIt
 	}
 
 	// Check if objName is an event — complete with connect/emit/disconnect
-	if ev := d.findEventByName(cls, objName); ev != nil {
+	if ev := cls.FindEvent(objName); ev != nil {
 		items = append(items, d.completeEventMembers(ev)...)
 		return items
 	}
 
 	// Check fields on current class (resolve type via codegen for accuracy)
-	for _, f := range cls.Fields {
-		if f.Name == objName {
-			typeName := d.ResolveFieldType(f, fullName)
-			if typeName != "" {
-				items = append(items, d.completeTypeMembers(typeName, classes)...)
-				return items
-			}
+	if f := cls.FindField(objName); f != nil {
+		typeName := d.ResolveFieldType(f, fullName)
+		if typeName != "" {
+			items = append(items, d.completeTypeMembers(typeName, classes)...)
+			return items
 		}
 	}
 
@@ -254,14 +252,12 @@ func (d *Document) resolveFieldType(typeName, fieldName string, classes map[stri
 	if cls == nil {
 		return ""
 	}
-	for _, f := range cls.Fields {
-		if f.Name == fieldName {
-			ktype := typeExprToString(f.TypeExpr)
-			if ktype == "" {
-				ktype = d.ResolveFieldType(f, typeName)
-			}
-			return ktype
+	if f := cls.FindField(fieldName); f != nil {
+		ktype := typeExprToString(f.TypeExpr)
+		if ktype == "" {
+			ktype = d.ResolveFieldType(f, typeName)
 		}
+		return ktype
 	}
 	// Check parent
 	if cls.Parent != "" {
@@ -295,15 +291,12 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		return nil
 	}
 
-	// Build type parameter substitution map for generic classes
-	sub := buildTypeParamSub(typeName, cls)
-
 	for _, f := range cls.Fields {
 		ktype := typeExprToString(f.TypeExpr)
 		if ktype == "" && f.Inferred {
 			ktype = "(inferred)"
 		}
-		ktype = applyTypeParamSub(ktype, sub)
+		ktype = resolveTypeWithParams(typeName, cls, ktype)
 		items = append(items, CompletionItem{
 			Label:  f.Name,
 			Detail: ktype,
@@ -311,7 +304,7 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		})
 	}
 	for _, m := range cls.Methods {
-		detail := applyTypeParamSub(formatMethodSignature(m), sub)
+		detail := resolveTypeWithParams(typeName, cls, formatMethodSignature(m))
 		items = append(items, CompletionItem{
 			Label:  m.Name,
 			Detail: detail,
@@ -319,7 +312,7 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 		})
 	}
 	for _, p := range cls.Properties {
-		ktype := applyTypeParamSub(typeExprToString(p.TypeExpr), sub)
+		ktype := resolveTypeWithParams(typeName, cls, typeExprToString(p.TypeExpr))
 		items = append(items, CompletionItem{
 			Label:  p.Name,
 			Detail: ktype,
@@ -483,19 +476,6 @@ func formatEventParams(ev *parser.EventDecl) string {
 		params = append(params, s)
 	}
 	return strings.Join(params, ", ")
-}
-
-// findEventByName looks up an event declaration on a class by name.
-func (d *Document) findEventByName(cls *parser.ClassDecl, name string) *parser.EventDecl {
-	if cls == nil {
-		return nil
-	}
-	for _, ev := range cls.Events {
-		if ev.Name == name {
-			return ev
-		}
-	}
-	return nil
 }
 
 // completeEventMembers returns completions for event methods.

@@ -110,25 +110,17 @@ func (d *Document) findMemberDefinition(typeName, member string, classes map[str
 	}
 
 	uri := d.classURI(cls)
-	for _, f := range cls.Fields {
-		if f.Name == member && f.Pos.Line > 0 {
-			return &DefinitionResult{URI: uri, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
-		}
+	if f := cls.FindField(member); f != nil && f.Pos.Line > 0 {
+		return &DefinitionResult{URI: uri, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
 	}
-	for _, m := range cls.Methods {
-		if m.Name == member && m.Pos.Line > 0 {
-			return &DefinitionResult{URI: uri, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
-		}
+	if m := cls.FindMethod(member); m != nil && m.Pos.Line > 0 {
+		return &DefinitionResult{URI: uri, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
 	}
-	for _, p := range cls.Properties {
-		if p.Name == member && p.Pos.Line > 0 {
-			return &DefinitionResult{URI: uri, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
-		}
+	if p := cls.FindProperty(member); p != nil && p.Pos.Line > 0 {
+		return &DefinitionResult{URI: uri, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
 	}
-	for _, ev := range cls.Events {
-		if ev.Name == member && ev.Pos.Line > 0 {
-			return &DefinitionResult{URI: uri, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
-		}
+	if ev := cls.FindEvent(member); ev != nil && ev.Pos.Line > 0 {
+		return &DefinitionResult{URI: uri, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
 	}
 
 	if cls.Parent != "" {
@@ -186,31 +178,20 @@ func (d *Document) definitionBare(name string, line int) *DefinitionResult {
 	}
 
 	// Check fields
-	for _, f := range cls.Fields {
-		if f.Name == name && f.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
-		}
+	if f := cls.FindField(name); f != nil && f.Pos.Line > 0 {
+		return &DefinitionResult{URI: d.URI, Line: f.Pos.Line, Col: f.Pos.Col, EndCol: f.Pos.EndCol}
 	}
-
 	// Check methods
-	for _, m := range cls.Methods {
-		if m.Name == name && m.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
-		}
+	if m := cls.FindMethod(name); m != nil && m.Pos.Line > 0 {
+		return &DefinitionResult{URI: d.URI, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
 	}
-
 	// Check events
-	for _, ev := range cls.Events {
-		if ev.Name == name && ev.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
-		}
+	if ev := cls.FindEvent(name); ev != nil && ev.Pos.Line > 0 {
+		return &DefinitionResult{URI: d.URI, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
 	}
-
 	// Check properties
-	for _, p := range cls.Properties {
-		if p.Name == name && p.Pos.Line > 0 {
-			return &DefinitionResult{URI: d.URI, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
-		}
+	if p := cls.FindProperty(name); p != nil && p.Pos.Line > 0 {
+		return &DefinitionResult{URI: d.URI, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
 	}
 
 	return nil

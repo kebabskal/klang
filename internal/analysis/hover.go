@@ -15,6 +15,23 @@ type HoverResult struct {
 	EndCol  int
 }
 
+// hoverMarkdown formats a klang code block with optional context text.
+func hoverMarkdown(signature, context string) string {
+	md := "```klang\n" + signature + "\n```"
+	if context != "" {
+		md += "\n" + context
+	}
+	return md
+}
+
+// makeHover creates a HoverResult with formatted markdown content.
+func makeHover(signature, context string, tok *lexer.Token) *HoverResult {
+	return &HoverResult{
+		Content: hoverMarkdown(signature, context),
+		Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+	}
+}
+
 // Hover returns hover information at the given position (1-based).
 func (d *Document) Hover(line, col int) *HoverResult {
 	if d.AST == nil {
@@ -61,30 +78,21 @@ func (d *Document) hoverChained(chain []string, member string, line int, tok *le
 		if sigs, ok := StdlibModuleSignatures[objName]; ok {
 			for _, sig := range sigs {
 				if sig.Name == member {
-					return &HoverResult{
-						Content: "```klang\n" + objName + "." + sig.Detail + "\n```",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(objName+"."+sig.Detail, "", tok)
 				}
 			}
 		}
 		if consts, ok := StdlibModuleConstantNames[objName]; ok {
 			for _, c := range consts {
 				if c.Name == member {
-					return &HoverResult{
-						Content: "```klang\n" + objName + "." + c.Name + " — " + c.Detail + "\n```",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(objName+"."+c.Name+" — "+c.Detail, "", tok)
 				}
 			}
 		}
 		if members, ok := StdlibNamespaces[objName]; ok {
 			for _, m := range members {
 				if m.Name == member {
-					return &HoverResult{
-						Content: "```klang\n" + objName + "." + m.Name + ":" + m.Detail + "\n```",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(objName+"."+m.Name+":"+m.Detail, "", tok)
 				}
 			}
 		}
@@ -92,7 +100,7 @@ func (d *Document) hoverChained(chain []string, member string, line int, tok *le
 		// Check event member access (bare event name: event_name.emit/connect)
 		cls, _ := d.FindEnclosingClass(line)
 		if cls != nil {
-			if ev := d.findEventByName(cls, objName); ev != nil {
+			if ev := cls.FindEvent(objName); ev != nil {
 				return d.hoverEventMember(ev, member, tok)
 			}
 		}
@@ -129,13 +137,8 @@ func (d *Document) hoverChained(chain []string, member string, line int, tok *le
 
 	// Check if member is an event on the resolved type
 	if resolvedCls := d.findClass(typeName, classes); resolvedCls != nil {
-		for _, ev := range resolvedCls.Events {
-			if ev.Name == member {
-				return &HoverResult{
-					Content: "```klang\n" + member + ":event(" + formatEventParams(ev) + ")\n```\nEvent on `" + typeName + "`",
-					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-				}
-			}
+		if ev := resolvedCls.FindEvent(member); ev != nil {
+			return makeHover(member+":event("+formatEventParams(ev)+")", "Event on `"+typeName+"`", tok)
 		}
 	}
 
@@ -158,47 +161,24 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 		return nil
 	}
 
-	// Build type parameter substitution map from typeName (e.g. "Stack<string>" → {T: string})
-	sub := buildTypeParamSub(typeName, cls)
-
-	for _, f := range cls.Fields {
-		if f.Name == member {
-			ktype := typeExprToString(f.TypeExpr)
-			if ktype == "" {
-				ktype = "(inferred)"
-			}
-			ktype = applyTypeParamSub(ktype, sub)
-			return &HoverResult{
-				Content: "```klang\n" + member + ":" + ktype + "\n```\nField on `" + typeName + "`",
-				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-			}
+	if f := cls.FindField(member); f != nil {
+		ktype := typeExprToString(f.TypeExpr)
+		if ktype == "" {
+			ktype = "(inferred)"
 		}
+		ktype = resolveTypeWithParams(typeName, cls, ktype)
+		return makeHover(member+":"+ktype, "Field on `"+typeName+"`", tok)
 	}
-	for _, m := range cls.Methods {
-		if m.Name == member {
-			sig := applyTypeParamSub(formatMethodSignature(m), sub)
-			return &HoverResult{
-				Content: "```klang\n" + sig + "\n```\nMethod on `" + typeName + "`",
-				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-			}
-		}
+	if m := cls.FindMethod(member); m != nil {
+		sig := resolveTypeWithParams(typeName, cls, formatMethodSignature(m))
+		return makeHover(sig, "Method on `"+typeName+"`", tok)
 	}
-	for _, p := range cls.Properties {
-		if p.Name == member {
-			ktype := applyTypeParamSub(typeExprToString(p.TypeExpr), sub)
-			return &HoverResult{
-				Content: "```klang\n" + member + ":" + ktype + "\n```\nProperty on `" + typeName + "`",
-				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-			}
-		}
+	if p := cls.FindProperty(member); p != nil {
+		ktype := resolveTypeWithParams(typeName, cls, typeExprToString(p.TypeExpr))
+		return makeHover(member+":"+ktype, "Property on `"+typeName+"`", tok)
 	}
-	for _, ev := range cls.Events {
-		if ev.Name == member {
-			return &HoverResult{
-				Content: "```klang\n" + member + ":event(" + formatEventParams(ev) + ")\n```\nEvent on `" + typeName + "`",
-				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-			}
-		}
+	if ev := cls.FindEvent(member); ev != nil {
+		return makeHover(member+":event("+formatEventParams(ev)+")", "Event on `"+typeName+"`", tok)
 	}
 
 	// Check parent
@@ -252,6 +232,11 @@ func applyTypeParamSub(sig string, sub map[string]string) string {
 	return strings.NewReplacer(oldnew...).Replace(sig)
 }
 
+// resolveTypeWithParams combines building and applying type parameter substitution.
+func resolveTypeWithParams(typeName string, cls *parser.ClassDecl, ktype string) string {
+	return applyTypeParamSub(ktype, buildTypeParamSub(typeName, cls))
+}
+
 func (d *Document) hoverBuiltinMember(typeName, member string, tok *lexer.Token) *HoverResult {
 	// Try exact match first, then generic base name
 	lookups := []string{typeName}
@@ -263,10 +248,7 @@ func (d *Document) hoverBuiltinMember(typeName, member string, tok *lexer.Token)
 			for _, m := range members {
 				if m.Label == member {
 					detail := d.expandGenericPlaceholders(typeName, m.Detail)
-					return &HoverResult{
-						Content: "```klang\n" + detail + "\n```\nMethod on `" + typeName + "`",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(detail, "Method on `"+typeName+"`", tok)
 				}
 			}
 		}
@@ -344,10 +326,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 					if ktype == "" {
 						ktype = "(inferred)"
 					}
-					return &HoverResult{
-						Content: "```klang\n" + name + ":" + ktype + "\n```\nLocal variable",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(name+":"+ktype, "Local variable", tok)
 				}
 			}
 
@@ -358,10 +337,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 					if ktype == "" {
 						ktype = "(inferred)"
 					}
-					return &HoverResult{
-						Content: "```klang\n" + name + ":" + ktype + "\n```\nParameter",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return makeHover(name+":"+ktype, "Parameter", tok)
 				}
 			}
 
@@ -376,10 +352,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 				if sigs, ok := StdlibModuleSignatures[mod]; ok {
 					for _, sig := range sigs {
 						if sig.Name == name {
-							return &HoverResult{
-								Content: "```klang\n" + mod + "." + sig.Detail + "\n```\nvia `with " + mod + "`",
-								Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-							}
+							return makeHover(mod+"."+sig.Detail, "via `with "+mod+"`", tok)
 						}
 					}
 				}
@@ -387,38 +360,22 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 		}
 
 		// Check fields on current class
-		for _, f := range cls.Fields {
-			if f.Name == name {
-				ktype := d.ResolveFieldType(f, fullName)
-				if ktype == "" {
-					ktype = "(inferred)"
-				}
-				return &HoverResult{
-					Content: "```klang\n" + name + ":" + ktype + "\n```\nField on `" + cls.Name + "`",
-					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-				}
+		if f := cls.FindField(name); f != nil {
+			ktype := d.ResolveFieldType(f, fullName)
+			if ktype == "" {
+				ktype = "(inferred)"
 			}
+			return makeHover(name+":"+ktype, "Field on `"+cls.Name+"`", tok)
 		}
 
 		// Check methods on current class
-		for _, m := range cls.Methods {
-			if m.Name == name {
-				sig := formatMethodSignature(m)
-				return &HoverResult{
-					Content: "```klang\n" + sig + "\n```\nMethod on `" + cls.Name + "`",
-					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-				}
-			}
+		if m := cls.FindMethod(name); m != nil {
+			return makeHover(formatMethodSignature(m), "Method on `"+cls.Name+"`", tok)
 		}
 
 		// Check events on current class
-		for _, ev := range cls.Events {
-			if ev.Name == name {
-				return &HoverResult{
-					Content: "```klang\n" + name + ":event(" + formatEventParams(ev) + ")\n```\nEvent on `" + cls.Name + "`",
-					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-				}
-			}
+		if ev := cls.FindEvent(name); ev != nil {
+			return makeHover(name+":event("+formatEventParams(ev)+")", "Event on `"+cls.Name+"`", tok)
 		}
 	}
 
@@ -429,10 +386,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 			if foundCls.Parent != "" {
 				info += ":" + foundCls.Parent
 			}
-			return &HoverResult{
-				Content: "```klang\n" + info + "\n```",
-				Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-			}
+			return makeHover(info, "", tok)
 		}
 		// suffix match
 		for fullName, foundCls := range classes {
@@ -441,10 +395,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 				if foundCls.Parent != "" {
 					info += ":" + foundCls.Parent
 				}
-				return &HoverResult{
-					Content: "```klang\n" + info + "\n```",
-					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-				}
+				return makeHover(info, "", tok)
 			}
 		}
 	}
@@ -457,10 +408,7 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 		"quat": "quat(x:float, y:float, z:float, w:float):quat",
 	}
 	if sig, ok := builtinCtors[name]; ok {
-		return &HoverResult{
-			Content: "```klang\n" + sig + "\n```\nBuilt-in constructor",
-			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-		}
+		return makeHover(sig, "Built-in constructor", tok)
 	}
 
 	return nil
@@ -471,21 +419,12 @@ func (d *Document) hoverEventMember(ev *parser.EventDecl, member string, tok *le
 	switch member {
 	case "connect":
 		handlerSig := "(" + paramStr + ") => void"
-		return &HoverResult{
-			Content: "```klang\n" + ev.Name + ".connect(handler: " + handlerSig + ")\n```\nConnect a handler to this event",
-			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-		}
+		return makeHover(ev.Name+".connect(handler: "+handlerSig+")", "Connect a handler to this event", tok)
 	case "disconnect":
-		return &HoverResult{
-			Content: "```klang\n" + ev.Name + ".disconnect(handler)\n```\nDisconnect a handler from this event",
-			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-		}
+		return makeHover(ev.Name+".disconnect(handler)", "Disconnect a handler from this event", tok)
 	case "emit":
 		sig := formatEventSignature(ev)
-		return &HoverResult{
-			Content: "```klang\n" + ev.Name + "." + sig + "\n```\nEmit this event, calling all connected handlers",
-			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-		}
+		return makeHover(ev.Name+"."+sig, "Emit this event, calling all connected handlers", tok)
 	}
 	return nil
 }
@@ -509,16 +448,13 @@ func (d *Document) resolveIdentType(name string, line int) string {
 	}
 
 	// Check fields (use codegen for accurate type resolution)
-	for _, f := range cls.Fields {
-		if f.Name == name {
-			resolved := d.ResolveFieldType(f, fullName)
-			if resolved != "" {
-				return resolved
-			}
-			// Fallback to type expression
-			if f.TypeExpr != nil {
-				return typeExprToString(f.TypeExpr)
-			}
+	if f := cls.FindField(name); f != nil {
+		resolved := d.ResolveFieldType(f, fullName)
+		if resolved != "" {
+			return resolved
+		}
+		if f.TypeExpr != nil {
+			return typeExprToString(f.TypeExpr)
 		}
 	}
 	return ""
@@ -549,122 +485,135 @@ func (d *Document) findClass(name string, classes map[string]*parser.ClassDecl) 
 	return nil
 }
 
-// hoverLambdaParam checks if the cursor is on a lambda parameter and resolves its type
-// from the enclosing call context (e.g., event connect handler params).
-func (d *Document) hoverLambdaParam(name string, method *parser.MethodDecl, line int, tok *lexer.Token) *HoverResult {
+// lambdaParamMatch holds the result of finding a lambda parameter in the AST.
+type lambdaParamMatch struct {
+	Param      *parser.Param
+	Index      int
+	ParamHints []*parser.Param
+}
+
+// findLambdaParam walks the method body to find a lambda parameter by name.
+// Returns the matched param, its index, and the call context's parameter hints.
+func (d *Document) findLambdaParam(name string, method *parser.MethodDecl, line int) *lambdaParamMatch {
 	if method.Body == nil {
 		return nil
 	}
-	return d.findLambdaParamInBlock(name, method.Body, line, tok)
+	return d.findLambdaParamInBlock(name, method.Body, line)
 }
 
-func (d *Document) findLambdaParamInBlock(name string, block *parser.Block, line int, tok *lexer.Token) *HoverResult {
+func (d *Document) findLambdaParamInBlock(name string, block *parser.Block, line int) *lambdaParamMatch {
 	for _, stmt := range block.Stmts {
-		if result := d.findLambdaParamInStmt(name, stmt, line, tok); result != nil {
-			return result
+		if m := d.findLambdaParamInStmt(name, stmt, line); m != nil {
+			return m
 		}
 	}
 	return nil
 }
 
-func (d *Document) findLambdaParamInStmt(name string, stmt parser.Stmt, line int, tok *lexer.Token) *HoverResult {
+func (d *Document) findLambdaParamInStmt(name string, stmt parser.Stmt, line int) *lambdaParamMatch {
 	switch s := stmt.(type) {
 	case *parser.ExprStmt:
-		return d.findLambdaParamInExpr(name, s.Expr, line, tok, nil)
+		return d.findLambdaParamInExpr(name, s.Expr, line, nil)
 	case *parser.VarDecl:
 		if s.Value != nil {
-			return d.findLambdaParamInExpr(name, s.Value, line, tok, nil)
+			return d.findLambdaParamInExpr(name, s.Value, line, nil)
 		}
 	case *parser.AssignStmt:
 		if s.Value != nil {
-			return d.findLambdaParamInExpr(name, s.Value, line, tok, nil)
+			return d.findLambdaParamInExpr(name, s.Value, line, nil)
 		}
 	case *parser.ForStmt:
 		if s.Body != nil {
-			return d.findLambdaParamInBlock(name, s.Body, line, tok)
+			return d.findLambdaParamInBlock(name, s.Body, line)
 		}
 	case *parser.IfStmt:
 		if s.Then != nil {
-			if r := d.findLambdaParamInBlock(name, s.Then, line, tok); r != nil {
-				return r
+			if m := d.findLambdaParamInBlock(name, s.Then, line); m != nil {
+				return m
 			}
 		}
 		if blk, ok := s.Else.(*parser.Block); ok {
-			if r := d.findLambdaParamInBlock(name, blk, line, tok); r != nil {
-				return r
+			if m := d.findLambdaParamInBlock(name, blk, line); m != nil {
+				return m
 			}
 		}
 	case *parser.WhileStmt:
 		if s.Body != nil {
-			return d.findLambdaParamInBlock(name, s.Body, line, tok)
+			return d.findLambdaParamInBlock(name, s.Body, line)
 		}
 	case *parser.WithStmt:
 		if s.Body != nil {
-			return d.findLambdaParamInBlock(name, s.Body, line, tok)
+			return d.findLambdaParamInBlock(name, s.Body, line)
 		}
 	case *parser.ReturnStmt:
 		if s.Value != nil {
-			return d.findLambdaParamInExpr(name, s.Value, line, tok, nil)
+			return d.findLambdaParamInExpr(name, s.Value, line, nil)
 		}
 	}
 	return nil
 }
 
-// findLambdaParamInExpr walks expressions to find lambda params.
-// paramHints are the expected types from the enclosing call context.
-func (d *Document) findLambdaParamInExpr(name string, expr parser.Expr, line int, tok *lexer.Token, paramHints []*parser.Param) *HoverResult {
+func (d *Document) findLambdaParamInExpr(name string, expr parser.Expr, line int, paramHints []*parser.Param) *lambdaParamMatch {
 	switch e := expr.(type) {
 	case *parser.CallExpr:
-		// Resolve what's being called to get parameter type hints for lambda args
 		hints := d.resolveCallParamHints(e)
 		for i, arg := range e.Args {
 			var argHints []*parser.Param
 			if hints != nil && i < len(hints) {
 				argHints = hints
 			}
-			if r := d.findLambdaParamInExpr(name, arg, line, tok, argHints); r != nil {
-				return r
+			if m := d.findLambdaParamInExpr(name, arg, line, argHints); m != nil {
+				return m
 			}
 		}
 	case *parser.LambdaExpr:
-		// Check if the cursor line falls within this lambda's scope
 		lambdaStartLine := 0
 		if len(e.Params) > 0 && e.Params[0].Pos.Line > 0 {
 			lambdaStartLine = e.Params[0].Pos.Line
 		}
 		if lambdaStartLine > 0 && line >= lambdaStartLine {
-			// Check if any of the lambda's params match our name
 			for i, p := range e.Params {
 				if p.Name == name {
-					ktype := typeExprToString(p.TypeExpr)
-					if ktype == "" && paramHints != nil && i < len(paramHints) {
-						ktype = typeExprToString(paramHints[i].TypeExpr)
-					}
-					if ktype == "" {
-						ktype = "(inferred)"
-					}
-					return &HoverResult{
-						Content: "```klang\n" + name + ":" + ktype + "\n```\nLambda parameter",
-						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
-					}
+					return &lambdaParamMatch{Param: p, Index: i, ParamHints: paramHints}
 				}
 			}
-			// Also check inside the lambda body for nested lambdas
 			if e.Body != nil {
-				return d.findLambdaParamInBlock(name, e.Body, line, tok)
+				return d.findLambdaParamInBlock(name, e.Body, line)
 			}
 		}
 	case *parser.MemberExpr:
-		return d.findLambdaParamInExpr(name, e.Object, line, tok, nil)
+		return d.findLambdaParamInExpr(name, e.Object, line, nil)
 	case *parser.BinaryExpr:
-		if r := d.findLambdaParamInExpr(name, e.Left, line, tok, nil); r != nil {
-			return r
+		if m := d.findLambdaParamInExpr(name, e.Left, line, nil); m != nil {
+			return m
 		}
-		return d.findLambdaParamInExpr(name, e.Right, line, tok, nil)
+		return d.findLambdaParamInExpr(name, e.Right, line, nil)
 	case *parser.UnaryExpr:
-		return d.findLambdaParamInExpr(name, e.Operand, line, tok, nil)
+		return d.findLambdaParamInExpr(name, e.Operand, line, nil)
 	}
 	return nil
+}
+
+// resolveMatchType extracts the type string from a lambda param match.
+func resolveMatchType(m *lambdaParamMatch) string {
+	ktype := typeExprToString(m.Param.TypeExpr)
+	if ktype == "" && m.ParamHints != nil && m.Index < len(m.ParamHints) {
+		ktype = typeExprToString(m.ParamHints[m.Index].TypeExpr)
+	}
+	return ktype
+}
+
+// hoverLambdaParam checks if the cursor is on a lambda parameter and resolves its type.
+func (d *Document) hoverLambdaParam(name string, method *parser.MethodDecl, line int, tok *lexer.Token) *HoverResult {
+	m := d.findLambdaParam(name, method, line)
+	if m == nil {
+		return nil
+	}
+	ktype := resolveMatchType(m)
+	if ktype == "" {
+		ktype = "(inferred)"
+	}
+	return makeHover(name+":"+ktype, "Lambda parameter", tok)
 }
 
 // resolveCallParamHints resolves the parameter types for a call expression,
@@ -687,25 +636,17 @@ func (d *Document) resolveCallParamHints(call *parser.CallExpr) []*parser.Param 
 			return nil
 		}
 		// Check if it's an event (connect pattern: event(handler) or event.connect(handler))
-		for _, ev := range cls.Events {
-			if ev.Name == methodName {
-				// The lambda should receive the event's params
-				return ev.Params
-			}
+		if ev := cls.FindEvent(methodName); ev != nil {
+			return ev.Params
 		}
 		// Check methods
-		for _, m := range cls.Methods {
-			if m.Name == methodName {
-				return m.Params
-			}
+		if m := cls.FindMethod(methodName); m != nil {
+			return m.Params
 		}
 		if cls.Parent != "" {
-			parentCls := d.findClass(cls.Parent, classes)
-			if parentCls != nil {
-				for _, m := range parentCls.Methods {
-					if m.Name == methodName {
-						return m.Params
-					}
+			if parentCls := d.findClass(cls.Parent, classes); parentCls != nil {
+				if m := parentCls.FindMethod(methodName); m != nil {
+					return m.Params
 				}
 			}
 		}
@@ -741,125 +682,19 @@ func (d *Document) resolveExprKlangType(expr parser.Expr) string {
 
 // resolveLambdaParamType walks the method body to find a lambda parameter's type.
 func (d *Document) resolveLambdaParamType(name string, method *parser.MethodDecl, line int) string {
-	if method.Body == nil {
+	m := d.findLambdaParam(name, method, line)
+	if m == nil {
 		return ""
 	}
-	return d.findLambdaParamTypeInBlock(name, method.Body, line)
-}
-
-func (d *Document) findLambdaParamTypeInBlock(name string, block *parser.Block, line int) string {
-	for _, stmt := range block.Stmts {
-		if t := d.findLambdaParamTypeInStmt(name, stmt, line); t != "" {
-			return t
-		}
-	}
-	return ""
-}
-
-func (d *Document) findLambdaParamTypeInStmt(name string, stmt parser.Stmt, line int) string {
-	switch s := stmt.(type) {
-	case *parser.ExprStmt:
-		return d.findLambdaParamTypeInExpr(name, s.Expr, line, nil)
-	case *parser.VarDecl:
-		if s.Value != nil {
-			return d.findLambdaParamTypeInExpr(name, s.Value, line, nil)
-		}
-	case *parser.AssignStmt:
-		if s.Value != nil {
-			return d.findLambdaParamTypeInExpr(name, s.Value, line, nil)
-		}
-	case *parser.ForStmt:
-		if s.Body != nil {
-			return d.findLambdaParamTypeInBlock(name, s.Body, line)
-		}
-	case *parser.IfStmt:
-		if s.Then != nil {
-			if t := d.findLambdaParamTypeInBlock(name, s.Then, line); t != "" {
-				return t
-			}
-		}
-		if blk, ok := s.Else.(*parser.Block); ok {
-			return d.findLambdaParamTypeInBlock(name, blk, line)
-		}
-	case *parser.WhileStmt:
-		if s.Body != nil {
-			return d.findLambdaParamTypeInBlock(name, s.Body, line)
-		}
-	case *parser.WithStmt:
-		if s.Body != nil {
-			return d.findLambdaParamTypeInBlock(name, s.Body, line)
-		}
-	case *parser.ReturnStmt:
-		if s.Value != nil {
-			return d.findLambdaParamTypeInExpr(name, s.Value, line, nil)
-		}
-	}
-	return ""
-}
-
-func (d *Document) findLambdaParamTypeInExpr(name string, expr parser.Expr, line int, paramHints []*parser.Param) string {
-	switch e := expr.(type) {
-	case *parser.CallExpr:
-		hints := d.resolveCallParamHints(e)
-		for i, arg := range e.Args {
-			var argHints []*parser.Param
-			if hints != nil && i < len(hints) {
-				argHints = hints
-			}
-			if t := d.findLambdaParamTypeInExpr(name, arg, line, argHints); t != "" {
-				return t
-			}
-		}
-	case *parser.LambdaExpr:
-		lambdaStartLine := 0
-		if len(e.Params) > 0 && e.Params[0].Pos.Line > 0 {
-			lambdaStartLine = e.Params[0].Pos.Line
-		}
-		if lambdaStartLine > 0 && line >= lambdaStartLine {
-			for i, p := range e.Params {
-				if p.Name == name {
-					ktype := typeExprToString(p.TypeExpr)
-					if ktype == "" && paramHints != nil && i < len(paramHints) {
-						ktype = typeExprToString(paramHints[i].TypeExpr)
-					}
-					return ktype
-				}
-			}
-			if e.Body != nil {
-				return d.findLambdaParamTypeInBlock(name, e.Body, line)
-			}
-		}
-	case *parser.MemberExpr:
-		return d.findLambdaParamTypeInExpr(name, e.Object, line, nil)
-	case *parser.BinaryExpr:
-		if t := d.findLambdaParamTypeInExpr(name, e.Left, line, nil); t != "" {
-			return t
-		}
-		return d.findLambdaParamTypeInExpr(name, e.Right, line, nil)
-	case *parser.UnaryExpr:
-		return d.findLambdaParamTypeInExpr(name, e.Operand, line, nil)
-	}
-	return ""
+	return resolveMatchType(m)
 }
 
 func (d *Document) findPrevMeaningfulToken(line, col int) *lexer.Token {
-	// Find the token immediately before the one at (line, col)
 	tok := d.TokenAtPosition(line, col)
 	if tok == nil {
 		return nil
 	}
-	var prev *lexer.Token
-	for i := range d.Tokens {
-		t := &d.Tokens[i]
-		if t.Type == lexer.TOKEN_NEWLINE || t.Type == lexer.TOKEN_INDENT || t.Type == lexer.TOKEN_EOF {
-			continue
-		}
-		if t.Line == tok.Line && t.Col == tok.Col {
-			return prev
-		}
-		prev = t
-	}
-	return prev
+	return d.findPrevMeaningfulTokenBefore(tok)
 }
 
 func (d *Document) findPrevMeaningfulTokenBefore(target *lexer.Token) *lexer.Token {

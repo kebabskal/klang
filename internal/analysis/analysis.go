@@ -51,6 +51,19 @@ type ParamInfo struct {
 	KType string
 }
 
+// addError appends an error diagnostic at the given position.
+func (d *Document) addError(pos parser.Pos, message string) {
+	d.Diags = append(d.Diags, errs.Diagnostic{
+		File:    d.URI,
+		Line:    pos.Line,
+		Col:     pos.Col,
+		EndCol:  pos.EndCol,
+		Kind:    errs.Error,
+		Message: message,
+		Source:  errs.GetSourceLine(d.Source, pos.Line),
+	})
+}
+
 // Analyze parses and analyzes a source file, returning a Document with diagnostics and symbol info.
 func Analyze(uri string, src []byte) *Document {
 	doc := &Document{URI: uri, Source: src}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/klang-lang/klang/internal/errs"
 	"github.com/klang-lang/klang/internal/parser"
 )
 
@@ -200,15 +199,7 @@ func (d *Document) checkStmt(stmt parser.Stmt, className string, scope *checkSco
 					if pos.Line <= 0 {
 						pos = d.exprPos(s.Target)
 					}
-					d.Diags = append(d.Diags, errs.Diagnostic{
-						File:    d.URI,
-						Line:    pos.Line,
-						Col:     pos.Col,
-						EndCol:  pos.EndCol,
-						Kind:    errs.Error,
-						Message: fmt.Sprintf("cannot assign type '%s' to '%s' of type '%s'", valueType, targetName, targetType),
-						Source:  errs.GetSourceLine(d.Source, pos.Line),
-					})
+					d.addError(pos, fmt.Sprintf("cannot assign type '%s' to '%s' of type '%s'", valueType, targetName, targetType))
 				}
 			}
 		}
@@ -282,15 +273,7 @@ func (d *Document) checkExpr(expr parser.Expr, scope *checkScope) {
 	switch e := expr.(type) {
 	case *parser.Ident:
 		if !scope.has(e.Name) && e.Pos.Line > 0 {
-			d.Diags = append(d.Diags, errs.Diagnostic{
-				File:    d.URI,
-				Line:    e.Pos.Line,
-				Col:     e.Pos.Col,
-				EndCol:  e.Pos.EndCol,
-				Kind:    errs.Error,
-				Message: "undeclared identifier '" + e.Name + "'",
-				Source:  errs.GetSourceLine(d.Source, e.Pos.Line),
-			})
+			d.addError(e.Pos, "undeclared identifier '"+e.Name+"'")
 		}
 
 	case *parser.MemberExpr:
@@ -374,15 +357,7 @@ func (d *Document) checkCallArgs(call *parser.CallExpr, scope *checkScope) {
 		// Find position for the error — use the callee position
 		pos := d.exprPos(call.Callee)
 		if pos.Line > 0 {
-			d.Diags = append(d.Diags, errs.Diagnostic{
-				File:    d.URI,
-				Line:    pos.Line,
-				Col:     pos.Col,
-				EndCol:  pos.EndCol,
-				Kind:    errs.Error,
-				Message: fmt.Sprintf("expected %d argument(s), got %d", len(paramTypes), len(call.Args)),
-				Source:  errs.GetSourceLine(d.Source, pos.Line),
-			})
+			d.addError(pos, fmt.Sprintf("expected %d argument(s), got %d", len(paramTypes), len(call.Args)))
 		}
 		return
 	}
@@ -405,19 +380,10 @@ func (d *Document) checkCallArgs(call *parser.CallExpr, scope *checkScope) {
 		if !typesCompatible(actualType, expectedType) {
 			pos := d.exprPos(arg)
 			if pos.Line <= 0 {
-				// Fallback: use callee position for the error
 				pos = d.exprPos(call.Callee)
 			}
 			if pos.Line > 0 {
-				d.Diags = append(d.Diags, errs.Diagnostic{
-					File:    d.URI,
-					Line:    pos.Line,
-					Col:     pos.Col,
-					EndCol:  pos.EndCol,
-					Kind:    errs.Error,
-					Message: fmt.Sprintf("type '%s' is not assignable to parameter type '%s'", actualType, expectedType),
-					Source:  errs.GetSourceLine(d.Source, pos.Line),
-				})
+				d.addError(pos, fmt.Sprintf("type '%s' is not assignable to parameter type '%s'", actualType, expectedType))
 			}
 		}
 	}
@@ -459,15 +425,8 @@ func (d *Document) checkMemberExists(member *parser.MemberExpr, scope *checkScop
 		case "connect", "emit", "disconnect":
 			return
 		}
-		d.Diags = append(d.Diags, errs.Diagnostic{
-			File:    d.URI,
-			Line:    member.Pos.Line,
-			Col:     member.Pos.Col,
-			EndCol:  member.Pos.Col + len(member.Field),
-			Kind:    errs.Error,
-			Message: fmt.Sprintf("event has no member '%s' (use connect, emit, or disconnect)", member.Field),
-			Source:  errs.GetSourceLine(d.Source, member.Pos.Line),
-		})
+		pos := parser.Pos{Line: member.Pos.Line, Col: member.Pos.Col, EndCol: member.Pos.Col + len(member.Field)}
+		d.addError(pos, fmt.Sprintf("event has no member '%s' (use connect, emit, or disconnect)", member.Field))
 		return
 	}
 
@@ -497,40 +456,15 @@ func (d *Document) checkMemberExists(member *parser.MemberExpr, scope *checkScop
 	// Also check List built-in methods if the type is List<T>
 	// (already handled above via typeName == "List")
 
-	d.Diags = append(d.Diags, errs.Diagnostic{
-		File:    d.URI,
-		Line:    member.Pos.Line,
-		Col:     member.Pos.Col,
-		EndCol:  member.Pos.Col + len(member.Field),
-		Kind:    errs.Error,
-		Message: fmt.Sprintf("'%s' has no member '%s'", typeName, member.Field),
-		Source:  errs.GetSourceLine(d.Source, member.Pos.Line),
-	})
+	pos := parser.Pos{Line: member.Pos.Line, Col: member.Pos.Col, EndCol: member.Pos.Col + len(member.Field)}
+	d.addError(pos, fmt.Sprintf("'%s' has no member '%s'", typeName, member.Field))
 }
 
 // classHasMember checks if a class (or its parents) has a field or method with the given name.
 func (d *Document) classHasMember(cls *parser.ClassDecl, name string, classes map[string]*parser.ClassDecl) bool {
-	for _, f := range cls.Fields {
-		if f.Name == name {
-			return true
-		}
+	if cls.HasMember(name) {
+		return true
 	}
-	for _, m := range cls.Methods {
-		if m.Name == name {
-			return true
-		}
-	}
-	for _, ev := range cls.Events {
-		if ev.Name == name {
-			return true
-		}
-	}
-	for _, prop := range cls.Properties {
-		if prop.Name == name {
-			return true
-		}
-	}
-	// Check parent
 	if cls.Parent != "" {
 		parent := d.findClass(cls.Parent, classes)
 		if parent != nil {
@@ -579,21 +513,17 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 			// Check enclosing class methods first
 			if scope.className != "" {
 				if enclosing := d.findClass(scope.className, classes); enclosing != nil {
-					for _, m := range enclosing.Methods {
-						if m.Name == ident.Name {
-							params := methodParamTypes(m)
-							return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
-						}
+					if m := enclosing.FindMethod(ident.Name); m != nil {
+						params := methodParamTypes(m)
+						return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
 					}
 				}
 			}
 			// Check other class methods
 			for _, cls := range classes {
-				for _, m := range cls.Methods {
-					if m.Name == ident.Name {
-						params := methodParamTypes(m)
-						return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
-					}
+				if m := cls.FindMethod(ident.Name); m != nil {
+					params := methodParamTypes(m)
+					return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
 				}
 			}
 			// Check constructors
@@ -627,23 +557,20 @@ func (d *Document) findMethodParamTypes(typeName, methodName string, classes map
 	if cls == nil {
 		return nil
 	}
-	for _, m := range cls.Methods {
-		if m.Name == methodName {
-			params := methodParamTypes(m)
-			// If the owning class is generic, blank out params that use class type params
-			if len(cls.TypeParams) > 0 {
-				tpSet := make(map[string]bool)
-				for _, tp := range cls.TypeParams {
-					tpSet[tp] = true
-				}
-				for i, p := range params {
-					if tpSet[p] {
-						params[i] = "" // skip checking — unresolved generic
-					}
+	if m := cls.FindMethod(methodName); m != nil {
+		params := methodParamTypes(m)
+		if len(cls.TypeParams) > 0 {
+			tpSet := make(map[string]bool)
+			for _, tp := range cls.TypeParams {
+				tpSet[tp] = true
+			}
+			for i, p := range params {
+				if tpSet[p] {
+					params[i] = ""
 				}
 			}
-			return params
 		}
+		return params
 	}
 	if cls.Parent != "" {
 		return d.findMethodParamTypes(cls.Parent, methodName, classes)
@@ -843,23 +770,15 @@ func (d *Document) resolveFieldKlangType(className, fieldName string) string {
 	if cls == nil {
 		return ""
 	}
-	// Build type parameter substitution for generic classes
-	sub := buildTypeParamSub(className, cls)
-	for _, f := range cls.Fields {
-		if f.Name == fieldName {
-			ktype := typeExprToString(f.TypeExpr)
-			if ktype != "" {
-				return applyTypeParamSub(ktype, sub)
-			}
-			// Fallback to codegen
-			return d.ResolveFieldType(f, className)
+	if f := cls.FindField(fieldName); f != nil {
+		ktype := typeExprToString(f.TypeExpr)
+		if ktype != "" {
+			return resolveTypeWithParams(className, cls, ktype)
 		}
+		return d.ResolveFieldType(f, className)
 	}
-	// Check properties
-	for _, prop := range cls.Properties {
-		if prop.Name == fieldName {
-			return applyTypeParamSub(typeExprToString(prop.TypeExpr), sub)
-		}
+	if prop := cls.FindProperty(fieldName); prop != nil {
+		return resolveTypeWithParams(className, cls, typeExprToString(prop.TypeExpr))
 	}
 	// Check parent
 	if cls.Parent != "" {
@@ -995,14 +914,12 @@ func (d *Document) resolveEventEmitParamTypes(eventName string) []string {
 		return nil
 	}
 	for _, cls := range d.AST.Classes {
-		for _, ev := range cls.Events {
-			if ev.Name == eventName {
-				types := make([]string, len(ev.Params))
-				for i, p := range ev.Params {
-					types[i] = typeExprToString(p.TypeExpr)
-				}
-				return types
+		if ev := cls.FindEvent(eventName); ev != nil {
+			types := make([]string, len(ev.Params))
+			for i, p := range ev.Params {
+				types[i] = typeExprToString(p.TypeExpr)
 			}
+			return types
 		}
 	}
 	return nil
