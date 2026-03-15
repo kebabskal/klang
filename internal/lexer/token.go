@@ -31,10 +31,12 @@ const (
 	TOKEN_MINUS      // -
 	TOKEN_STAR       // *
 	TOKEN_SLASH      // /
+	TOKEN_PERCENT    // %
 	TOKEN_PLUS_EQ    // +=
 	TOKEN_MINUS_EQ   // -=
 	TOKEN_STAR_EQ    // *=
 	TOKEN_SLASH_EQ   // /=
+	TOKEN_PERCENT_EQ // %=
 	TOKEN_DOT        // .
 	TOKEN_QUESTION_DOT // ?.
 	TOKEN_QUESTION_QUESTION // ??

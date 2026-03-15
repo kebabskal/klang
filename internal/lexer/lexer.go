@@ -198,6 +198,11 @@ func (l *Lexer) Tokenize() []Token {
 			l.advance(2)
 			continue
 		}
+		if ch == '%' && l.peek(1) == '=' {
+			l.emit(TOKEN_PERCENT_EQ, "%=")
+			l.advance(2)
+			continue
+		}
 		if ch == '?' && l.peek(1) == '.' {
 			l.emit(TOKEN_QUESTION_DOT, "?.")
 			l.advance(2)
@@ -242,6 +247,8 @@ func (l *Lexer) Tokenize() []Token {
 			l.emit(TOKEN_STAR, "*")
 		case '/':
 			l.emit(TOKEN_SLASH, "/")
+		case '%':
+			l.emit(TOKEN_PERCENT, "%")
 		case '<':
 			l.emit(TOKEN_LT, "<")
 		case '>':

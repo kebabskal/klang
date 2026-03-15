@@ -4080,17 +4080,18 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 					}
 				}
 			}
-			// Check if it's a class constructor → return pointer type
-			fullName := g.resolveFullClassName(ident.Name, g.currentClassName)
-			if _, ok := g.classes[fullName]; ok {
-				return fullName + "*"
-			}
 			// Check if it's a generic class constructor → return the mangled class pointer type
+			// (must check before regular classes since generic templates are also in g.classes)
 			gcName := g.resolveGenericClassName(ident.Name, g.currentClassName)
 			if gcls, ok := g.genericClasses[gcName]; ok {
 				typeMap := g.resolveGenericClassTypeArgs(gcls, e, g.currentClassName)
 				mangledClass := gcName + "_" + g.mangledSuffix(typeMap, gcls.TypeParams)
 				return mangledClass + "*"
+			}
+			// Check if it's a class constructor → return pointer type
+			fullName := g.resolveFullClassName(ident.Name, g.currentClassName)
+			if _, ok := g.classes[fullName]; ok {
+				return fullName + "*"
 			}
 		}
 		// Check if it's a module function call — infer return type

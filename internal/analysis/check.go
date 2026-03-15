@@ -581,7 +581,8 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 				if enclosing := d.findClass(scope.className, classes); enclosing != nil {
 					for _, m := range enclosing.Methods {
 						if m.Name == ident.Name {
-							return methodParamTypes(m)
+							params := methodParamTypes(m)
+							return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
 						}
 					}
 				}
@@ -590,14 +591,16 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 			for _, cls := range classes {
 				for _, m := range cls.Methods {
 					if m.Name == ident.Name {
-						return methodParamTypes(m)
+						params := methodParamTypes(m)
+						return substituteTypeParams(params, m.TypeParams, call.TypeArgs)
 					}
 				}
 			}
 			// Check constructors
 			for _, cls := range classes {
 				if cls.Name == ident.Name && cls.Constructor != nil {
-					return constructorParamTypes(cls.Constructor)
+					params := constructorParamTypes(cls.Constructor)
+					return substituteTypeParams(params, cls.TypeParams, call.TypeArgs)
 				}
 			}
 		}
@@ -626,7 +629,20 @@ func (d *Document) findMethodParamTypes(typeName, methodName string, classes map
 	}
 	for _, m := range cls.Methods {
 		if m.Name == methodName {
-			return methodParamTypes(m)
+			params := methodParamTypes(m)
+			// If the owning class is generic, blank out params that use class type params
+			if len(cls.TypeParams) > 0 {
+				tpSet := make(map[string]bool)
+				for _, tp := range cls.TypeParams {
+					tpSet[tp] = true
+				}
+				for i, p := range params {
+					if tpSet[p] {
+						params[i] = "" // skip checking — unresolved generic
+					}
+				}
+			}
+			return params
 		}
 	}
 	if cls.Parent != "" {
@@ -649,6 +665,40 @@ func constructorParamTypes(c *parser.ConstructorDecl) []string {
 		types[i] = typeExprToString(p.TypeExpr)
 	}
 	return types
+}
+
+// substituteTypeParams replaces generic type parameter names with concrete types.
+// typeParams are the declared names (e.g. ["T", "U"]) and typeArgs are the concrete
+// types from the call site (e.g. [SimpleType("int"), SimpleType("string")]).
+// If typeArgs is empty or doesn't match, the params are returned as-is, which
+// effectively skips type checking for unresolved generics.
+func substituteTypeParams(params []string, typeParams []string, typeArgs []parser.TypeExpr) []string {
+	if len(typeParams) == 0 {
+		return params
+	}
+	// Build substitution map
+	sub := make(map[string]string)
+	if len(typeArgs) == len(typeParams) {
+		// Explicit type args provided: <int, string>
+		for i, tp := range typeParams {
+			sub[tp] = typeExprToString(typeArgs[i])
+		}
+	} else {
+		// No explicit type args — skip checking by mapping params to ""
+		// (empty type is treated as compatible with anything)
+		for _, tp := range typeParams {
+			sub[tp] = ""
+		}
+	}
+	result := make([]string, len(params))
+	for i, p := range params {
+		if concrete, ok := sub[p]; ok {
+			result[i] = concrete
+		} else {
+			result[i] = p
+		}
+	}
+	return result
 }
 
 // inferExprType infers the Klang type of an expression using scope and codegen.

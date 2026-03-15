@@ -758,7 +758,7 @@ func (p *Parser) parseStmt() Stmt {
 
 	// Check for assignment: expr = value, expr += value, etc.
 	if p.check(lexer.TOKEN_EQ) || p.check(lexer.TOKEN_PLUS_EQ) || p.check(lexer.TOKEN_MINUS_EQ) ||
-		p.check(lexer.TOKEN_STAR_EQ) || p.check(lexer.TOKEN_SLASH_EQ) {
+		p.check(lexer.TOKEN_STAR_EQ) || p.check(lexer.TOKEN_SLASH_EQ) || p.check(lexer.TOKEN_PERCENT_EQ) {
 		op := p.current().Value
 		p.advance()
 		val := p.parseExpr()
@@ -977,7 +977,7 @@ func (p *Parser) parseAddition() Expr {
 
 func (p *Parser) parseMultiplication() Expr {
 	left := p.parseUnary()
-	for p.check(lexer.TOKEN_STAR) || p.check(lexer.TOKEN_SLASH) {
+	for p.check(lexer.TOKEN_STAR) || p.check(lexer.TOKEN_SLASH) || p.check(lexer.TOKEN_PERCENT) {
 		op := p.current().Value
 		p.advance()
 		right := p.parseUnary()
