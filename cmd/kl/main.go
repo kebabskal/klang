@@ -276,8 +276,8 @@ func cmdLsp() {
 	candidates := []string{
 		filepath.Join(dir, "kl-lsp.exe"),
 		filepath.Join(dir, "kl-lsp"),
-		filepath.Join("build", "kl-lsp.exe"),
-		filepath.Join("build", "kl-lsp"),
+		filepath.Join("bin", "kl-lsp.exe"),
+		filepath.Join("bin", "kl-lsp"),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -292,7 +292,7 @@ func cmdLsp() {
 		}
 	}
 	fmt.Fprintln(os.Stderr, errs.FormatSimple(errs.Error, "kl-lsp binary not found"))
-	fmt.Fprintln(os.Stderr, "build it with: go build -o build/kl-lsp ./cmd/kl-lsp")
+	fmt.Fprintln(os.Stderr, "build it with: go build -o bin/kl-lsp ./cmd/kl-lsp")
 	os.Exit(1)
 }
 

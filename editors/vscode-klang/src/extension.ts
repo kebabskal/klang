@@ -20,7 +20,7 @@ export function activate(context: ExtensionContext) {
 
 	const serverPath = findLspServer(context);
 	if (!serverPath) {
-		const msg = 'Klang LSP server (kl-lsp) not found. Build it with: go build -o build/kl-lsp.exe ./cmd/kl-lsp';
+		const msg = 'Klang LSP server (kl-lsp) not found. Build it with: go build -o bin/kl-lsp ./cmd/kl-lsp';
 		log('ERROR: ' + msg);
 		window.showWarningMessage(msg);
 		return;
@@ -79,8 +79,8 @@ function findLspServer(context: ExtensionContext): string | undefined {
 	} catch {}
 	for (const dir of extDirs) {
 		const candidates = [
-			path.join(dir, '..', '..', 'build', 'kl-lsp.exe'),
-			path.join(dir, '..', '..', 'build', 'kl-lsp'),
+			path.join(dir, '..', '..', 'bin', 'kl-lsp.exe'),
+			path.join(dir, '..', '..', 'bin', 'kl-lsp'),
 		];
 		for (const c of candidates) {
 			const resolved = path.resolve(c);
@@ -92,13 +92,13 @@ function findLspServer(context: ExtensionContext): string | undefined {
 		}
 	}
 
-	// 3. Check workspace root build/ directory
+	// 3. Check workspace root bin/ directory
 	const workspaceFolders = workspace.workspaceFolders;
 	if (workspaceFolders) {
 		for (const folder of workspaceFolders) {
 			const candidates = [
-				path.join(folder.uri.fsPath, 'build', 'kl-lsp.exe'),
-				path.join(folder.uri.fsPath, 'build', 'kl-lsp'),
+				path.join(folder.uri.fsPath, 'bin', 'kl-lsp.exe'),
+				path.join(folder.uri.fsPath, 'bin', 'kl-lsp'),
 			];
 			for (const c of candidates) {
 				log(`Checking: ${c}`);
