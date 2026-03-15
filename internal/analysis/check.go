@@ -247,8 +247,15 @@ func (d *Document) checkStmt(stmt parser.Stmt, className string, scope *checkSco
 		}
 		innerScope := scope.copy()
 		if s.VarName != "" {
-			ktype := d.inferForVarType(s.Iterable)
-			innerScope.set(s.VarName, ktype)
+			if s.ValueVar != "" {
+				// for key, value in dict
+				keyType, valType := d.inferForDictTypes(s.Iterable)
+				innerScope.set(s.VarName, keyType)
+				innerScope.set(s.ValueVar, valType)
+			} else {
+				ktype := d.inferForVarType(s.Iterable)
+				innerScope.set(s.VarName, ktype)
+			}
 		}
 		if s.Body != nil {
 			d.checkBlock(s.Body, className, innerScope)
@@ -468,7 +475,7 @@ func (d *Document) checkMemberExists(member *parser.MemberExpr, scope *checkScop
 	switch typeName {
 	case "vec2", "vec3", "vec4", "mat4", "quat",
 		"Color", "Rectangle", "Texture2D", "Font", "Sound", "Camera2D", "Camera3D",
-		"int", "float", "string", "bool", "List":
+		"int", "float", "string", "bool", "List", "Dictionary":
 		return
 	}
 
@@ -691,6 +698,10 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 		if elemType != "" {
 			return elemType
 		}
+		_, valType := extractDictTypes(objType)
+		if valType != "" {
+			return valType
+		}
 	}
 	// Fallback to codegen
 	if d.Gen != nil {
@@ -728,6 +739,29 @@ func extractListElementType(listType string) string {
 		return ""
 	}
 	return listType[5 : len(listType)-1]
+}
+
+// extractDictTypes extracts key and value types from "Dictionary<K, V>".
+func extractDictTypes(dictType string) (string, string) {
+	if !strings.HasPrefix(dictType, "Dictionary<") || !strings.HasSuffix(dictType, ">") {
+		return "", ""
+	}
+	inner := dictType[11 : len(dictType)-1]
+	// Split on ", " (handling nested generics)
+	depth := 0
+	for i, c := range inner {
+		switch c {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				return strings.TrimSpace(inner[:i]), strings.TrimSpace(inner[i+1:])
+			}
+		}
+	}
+	return "", ""
 }
 
 // resolveFieldKlangType looks up the Klang type of a field on a class by name.
@@ -927,7 +961,7 @@ var builtinIdents = []string{
 	"int", "float", "string", "bool", "void",
 	"vec2", "vec3", "vec4", "mat4", "quat",
 	"Color", "Rectangle", "Texture2D", "Font", "Sound", "Camera2D", "Camera3D",
-	"List", "Random",
+	"List", "Dictionary", "Random",
 	"print", "println", "str", "len", "append", "remove",
 	"true", "false", "nil", "null", "this", "self",
 	"math", "io", "rl", "os",

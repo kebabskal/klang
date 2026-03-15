@@ -187,6 +187,7 @@ func (i *IfStmt) stmtTag() {}
 
 type ForStmt struct {
 	VarName    string
+	ValueVar   string // second variable for "for key, value in dict"
 	Iterable   Expr
 	Body       *Block
 	Pos        Pos
@@ -351,6 +352,7 @@ func (s *StructLit) exprTag() {}
 
 type StructLitField struct {
 	Name  string // empty = positional
+	Key   Expr   // for dictionary entries: expr: value
 	Value Expr
 }
 

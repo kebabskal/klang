@@ -143,7 +143,13 @@ func (d *Document) hoverChained(chain []string, member string, line int, tok *le
 	// The "member" might be emit/connect/disconnect on an event found in the chain
 	// This is handled by checking if the last chain element is an event
 
-	return d.hoverClassMember(typeName, member, classes, tok)
+	// Check user-defined class members
+	if result := d.hoverClassMember(typeName, member, classes, tok); result != nil {
+		return result
+	}
+
+	// Check built-in type members (List, Dictionary, vec2, etc.)
+	return d.hoverBuiltinMember(typeName, member, tok)
 }
 
 func (d *Document) hoverClassMember(typeName, member string, classes map[string]*parser.ClassDecl, tok *lexer.Token) *HoverResult {
@@ -196,6 +202,81 @@ func (d *Document) hoverClassMember(typeName, member string, classes map[string]
 		return d.hoverClassMember(cls.Parent, member, classes, tok)
 	}
 	return nil
+}
+
+func (d *Document) hoverBuiltinMember(typeName, member string, tok *lexer.Token) *HoverResult {
+	// Try exact match first, then generic base name
+	lookups := []string{typeName}
+	if idx := strings.Index(typeName, "<"); idx > 0 {
+		lookups = append(lookups, typeName[:idx])
+	}
+	for _, name := range lookups {
+		if members, ok := BuiltinTypeMembers[name]; ok {
+			for _, m := range members {
+				if m.Label == member {
+					detail := d.expandGenericPlaceholders(typeName, m.Detail)
+					return &HoverResult{
+						Content: "```klang\n" + detail + "\n```\nMethod on `" + typeName + "`",
+						Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// expandGenericPlaceholders replaces K, V, T etc. in a detail string with the
+// actual type arguments from the concrete type name.
+// e.g. typeName="Dictionary<string, int>", detail="get(key:K):V" → "get(key:string):int"
+// e.g. typeName="List<Ball>", detail="append(item:T)" → "append(item:Ball)"
+func (d *Document) expandGenericPlaceholders(typeName, detail string) string {
+	idx := strings.Index(typeName, "<")
+	if idx < 0 {
+		return detail
+	}
+	baseName := typeName[:idx]
+	inner := typeName[idx+1 : len(typeName)-1] // strip < and >
+	args := splitTypeArgs(inner)
+
+	switch baseName {
+	case "Dictionary":
+		if len(args) >= 2 {
+			r := strings.NewReplacer(":K", ":"+args[0], "(K)", "("+args[0]+")",
+				":V", ":"+args[1], "):V", "):"+args[1],
+				"<K>", "<"+args[0]+">", "<V>", "<"+args[1]+">")
+			return r.Replace(detail)
+		}
+	case "List":
+		if len(args) >= 1 {
+			r := strings.NewReplacer(":T", ":"+args[0], "(T)", "("+args[0]+")",
+				"):T", "):"+args[0], "<T>", "<"+args[0]+">")
+			return r.Replace(detail)
+		}
+	}
+	return detail
+}
+
+// splitTypeArgs splits "string, int" into ["string", "int"], respecting nested <>.
+func splitTypeArgs(s string) []string {
+	var args []string
+	depth := 0
+	start := 0
+	for i, ch := range s {
+		switch ch {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	args = append(args, strings.TrimSpace(s[start:]))
+	return args
 }
 
 func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResult {

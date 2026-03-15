@@ -354,13 +354,20 @@ func (g *Generator) analyzeOwnershipGraph() {
 			if targetClass != "" {
 				graph[name] = append(graph[name], refEdge{field.Name, targetClass})
 			}
-			// Also check List<ClassName>
+			// Also check List<ClassName> and Dictionary<K, ClassName>
 			if field.TypeExpr != nil {
 				if gt, ok := field.TypeExpr.(*parser.GenericType); ok && gt.Name == "List" && len(gt.TypeArgs) > 0 {
 					elemCType := g.typeToC(gt.TypeArgs[0], name)
 					elemTarget := g.rcTargetClass(elemCType)
 					if elemTarget != "" {
 						graph[name] = append(graph[name], refEdge{field.Name, elemTarget})
+					}
+				}
+				if gt, ok := field.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+					valCType := g.typeToC(gt.TypeArgs[1], name)
+					valTarget := g.rcTargetClass(valCType)
+					if valTarget != "" {
+						graph[name] = append(graph[name], refEdge{field.Name, valTarget})
 					}
 				}
 			}
@@ -1290,6 +1297,33 @@ func (g *Generator) isListExpr(expr parser.Expr) bool {
 	return false
 }
 
+func (g *Generator) isDictExpr(expr parser.Expr) bool {
+	if ident, ok := expr.(*parser.Ident); ok {
+		if g.localVars != nil {
+			if t, ok := g.localVars[ident.Name]; ok {
+				return t == "KlDict*"
+			}
+		}
+		if g.localVarTypes != nil {
+			if typeExpr, ok := g.localVarTypes[ident.Name]; ok {
+				if gt, ok := typeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" {
+					return true
+				}
+			}
+		}
+		if g.currentClass != nil {
+			for _, f := range g.currentClass.Fields {
+				if f.Name == ident.Name {
+					if gt, ok := f.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (g *Generator) isMethod(name string) bool {
 	if g.currentClass == nil {
 		return false
@@ -1547,6 +1581,28 @@ func (g *Generator) emitConstructor(name string, cls *parser.ClassDecl) {
 				target = "self->_base." + field.Name
 			}
 
+			// Dictionary literals: create dict then set each entry
+			if sl, ok := field.Value.(*parser.StructLit); ok && g.typeToC(field.TypeExpr, name) == "KlDict*" {
+				keysAreStrings := g.dictKeysAreStrings(field.TypeExpr)
+				keysRC, valsRC := g.dictItemsAreRC(field.TypeExpr, name)
+				g.writeln("%s = kl_dict_new(%s, %s, %s);", target, g.boolToC(keysAreStrings), g.boolToC(keysRC), g.boolToC(valsRC))
+				keyType := ""
+				valType := ""
+				if gt, ok := field.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+					keyType = g.typeToC(gt.TypeArgs[0], name)
+					valType = g.typeToC(gt.TypeArgs[1], name)
+				}
+				for _, f := range sl.Fields {
+					var keyStr string
+					if f.Key != nil {
+						keyStr = g.dictPushCast(g.exprToC(f.Key), keyType)
+					} else if f.Name != "" {
+						keyStr = fmt.Sprintf("\"%s\"", f.Name)
+					}
+					valStr := g.dictPushCast(g.exprToC(f.Value), valType)
+					g.writeln("kl_dict_set(%s, %s, %s);", target, keyStr, valStr)
+				}
+			} else
 			// Array literals: create list then push each element
 			if arr, ok := field.Value.(*parser.ArrayLit); ok {
 				itemsRC := g.listItemsAreRC(field.TypeExpr, name)
@@ -1954,7 +2010,28 @@ func (g *Generator) emitStmt(stmt parser.Stmt, className string) {
 		if g.isRefCountedType(cType) {
 			g.pushScopeVar(s.Name, cType)
 		}
-		if arr, ok := s.Value.(*parser.ArrayLit); ok {
+		if sl, ok := s.Value.(*parser.StructLit); ok && cType == "KlDict*" && s.TypeExpr != nil {
+			// Dictionary literal: expand to dict_new + set calls
+			keysAreStrings := g.dictKeysAreStrings(s.TypeExpr)
+			keysRC, valsRC := g.dictItemsAreRC(s.TypeExpr, className)
+			g.writeln("%s %s = kl_dict_new(%s, %s, %s);", cType, s.Name, g.boolToC(keysAreStrings), g.boolToC(keysRC), g.boolToC(valsRC))
+			keyType := ""
+			valType := ""
+			if gt, ok := s.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+				keyType = g.typeToC(gt.TypeArgs[0], className)
+				valType = g.typeToC(gt.TypeArgs[1], className)
+			}
+			for _, f := range sl.Fields {
+				var keyStr string
+				if f.Key != nil {
+					keyStr = g.dictPushCast(g.exprToC(f.Key), keyType)
+				} else if f.Name != "" {
+					keyStr = fmt.Sprintf("\"%s\"", f.Name)
+				}
+				valStr := g.dictPushCast(g.exprToC(f.Value), valType)
+				g.writeln("kl_dict_set(%s, %s, %s);", s.Name, keyStr, valStr)
+			}
+		} else if arr, ok := s.Value.(*parser.ArrayLit); ok {
 			// Array literal: expand to list_new + push calls
 			itemsRC := g.listItemsAreRC(s.TypeExpr, className)
 			g.writeln("%s %s = kl_list_new(%s);", cType, s.Name, g.boolToC(itemsRC))
@@ -1979,8 +2056,15 @@ func (g *Generator) emitStmt(stmt parser.Stmt, className string) {
 		}
 
 	case *parser.AssignStmt:
-		// Direct index assignment: list[i] = val → kl_list_set(list, i, val)
+		// Direct index assignment: dict["key"] = val or list[i] = val
 		if idx, ok := s.Target.(*parser.IndexExpr); ok && s.Op == "=" {
+			if g.isDictExpr(idx.Object) {
+				obj := g.exprToC(idx.Object)
+				keyStr := g.dictPushCast(g.exprToC(idx.Index), g.resolveDictKeyType(idx.Object))
+				valueStr := g.dictPushCast(g.exprToC(s.Value), g.resolveDictValueType(idx.Object))
+				g.writeln("kl_dict_set(%s, %s, %s);", obj, keyStr, valueStr)
+				break
+			}
 			obj := g.exprToC(idx.Object)
 			idxStr := g.exprToC(idx.Index)
 			valueStr := g.exprToC(s.Value)
@@ -2145,6 +2229,43 @@ func (g *Generator) emitFor(s *parser.ForStmt, className string) {
 		g.writeln("for (int %s = 0; %s < %s; %s++) {", s.VarName, s.VarName, limit, s.VarName)
 		g.indent++
 		g.pushScope()
+		g.emitBlock(s.Body, className)
+		g.emitScopeCleanupCurrentOnly()
+		g.popScope()
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
+	// Dictionary iteration: for key, value in dict
+	if g.isDictExpr(s.Iterable) {
+		iter := g.exprToC(s.Iterable)
+		keyType := g.resolveDictKeyType(s.Iterable)
+		valType := g.resolveDictValueType(s.Iterable)
+
+		if g.localVars != nil {
+			g.localVars[s.VarName] = keyType
+			if s.ValueVar != "" {
+				g.localVars[s.ValueVar] = valType
+			}
+		}
+
+		g.writeln("for (int _i = 0; _i < %s->capacity; _i++) {", iter)
+		g.indent++
+		g.pushScope()
+		g.writeln("if (%s->states[_i] != KL_SLOT_USED) continue;", iter)
+		if g.isPrimitiveType(keyType) {
+			g.writeln("%s %s = (%s)(intptr_t)%s->keys[_i];", keyType, s.VarName, keyType, iter)
+		} else {
+			g.writeln("%s %s = (%s)%s->keys[_i];", keyType, s.VarName, keyType, iter)
+		}
+		if s.ValueVar != "" {
+			if g.isPrimitiveType(valType) {
+				g.writeln("%s %s = (%s)(intptr_t)%s->values[_i];", valType, s.ValueVar, valType, iter)
+			} else {
+				g.writeln("%s %s = (%s)%s->values[_i];", valType, s.ValueVar, valType, iter)
+			}
+		}
 		g.emitBlock(s.Body, className)
 		g.emitScopeCleanupCurrentOnly()
 		g.popScope()
@@ -2428,10 +2549,15 @@ func (g *Generator) listPushCast(valStr string, cType string) string {
 	return valStr
 }
 
-// Unwrap a value from kl_list_get: primitives need (type)(intptr_t) cast
+// Unwrap a value from kl_list_get or kl_dict_get
 func (g *Generator) emitIndexGet(e *parser.IndexExpr) string {
 	obj := g.exprToC(e.Object)
 	idx := g.exprToC(e.Index)
+	if g.isDictExpr(e.Object) {
+		valType := g.resolveDictValueType(e.Object)
+		keyType := g.resolveDictKeyType(e.Object)
+		return g.dictGetCast(valType, obj, g.dictPushCast(idx, keyType))
+	}
 	elemType := g.resolveForElemType(e.Object)
 	return g.listGetCast(elemType, obj, idx)
 }
@@ -2725,7 +2851,100 @@ func (g *Generator) resolveForElemType(iterable parser.Expr) string {
 			}
 		}
 	}
+	// Handle dict.keys() → key type, dict.values() → value type
+	if call, ok := iterable.(*parser.CallExpr); ok {
+		if mem, ok := call.Callee.(*parser.MemberExpr); ok {
+			if mem.Field == "keys" {
+				return g.resolveDictKeyType(mem.Object)
+			}
+			if mem.Field == "values" {
+				return g.resolveDictValueType(mem.Object)
+			}
+		}
+	}
 	return "void*"
+}
+
+// resolveDictKeyType returns the C type of the key for a Dictionary<K,V> expression.
+func (g *Generator) resolveDictKeyType(expr parser.Expr) string {
+	if ident, ok := expr.(*parser.Ident); ok {
+		if g.localVarTypes != nil {
+			if typeExpr, ok := g.localVarTypes[ident.Name]; ok {
+				if gt, ok := typeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+					return g.typeToC(gt.TypeArgs[0], g.currentClassName)
+				}
+			}
+		}
+		if g.currentClass != nil {
+			for _, f := range g.currentClass.Fields {
+				if f.Name == ident.Name {
+					if gt, ok := f.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+						return g.typeToC(gt.TypeArgs[0], g.currentClassName)
+					}
+				}
+			}
+		}
+	}
+	return "void*"
+}
+
+// resolveDictValueType returns the C type of the value for a Dictionary<K,V> expression.
+func (g *Generator) resolveDictValueType(expr parser.Expr) string {
+	if ident, ok := expr.(*parser.Ident); ok {
+		if g.localVarTypes != nil {
+			if typeExpr, ok := g.localVarTypes[ident.Name]; ok {
+				if gt, ok := typeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+					return g.typeToC(gt.TypeArgs[1], g.currentClassName)
+				}
+			}
+		}
+		if g.currentClass != nil {
+			for _, f := range g.currentClass.Fields {
+				if f.Name == ident.Name {
+					if gt, ok := f.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+						return g.typeToC(gt.TypeArgs[1], g.currentClassName)
+					}
+				}
+			}
+		}
+	}
+	return "void*"
+}
+
+// dictKeysAreStrings checks if the dictionary has string keys.
+func (g *Generator) dictKeysAreStrings(typeExpr parser.TypeExpr) bool {
+	if gt, ok := typeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 1 {
+		if st, ok := gt.TypeArgs[0].(*parser.SimpleType); ok && st.Name == "string" {
+			return true
+		}
+	}
+	return false
+}
+
+// dictItemsAreRC returns (keysRC, valuesRC) for a Dictionary type expression.
+func (g *Generator) dictItemsAreRC(typeExpr parser.TypeExpr, className string) (bool, bool) {
+	if gt, ok := typeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+		keyCType := g.typeToC(gt.TypeArgs[0], className)
+		valCType := g.typeToC(gt.TypeArgs[1], className)
+		return g.isRefCountedType(keyCType), g.isRefCountedType(valCType)
+	}
+	return false, false
+}
+
+// dictPushCast wraps a value for kl_dict_set: string keys use (void*), primitives need cast.
+func (g *Generator) dictPushCast(valStr string, cType string) string {
+	if g.isPrimitiveType(cType) {
+		return fmt.Sprintf("(void*)(intptr_t)(%s)", valStr)
+	}
+	return valStr
+}
+
+// dictGetCast unwraps a value from kl_dict_get.
+func (g *Generator) dictGetCast(elemType string, dictVar string, keyStr string) string {
+	if g.isPrimitiveType(elemType) {
+		return fmt.Sprintf("((%s)(intptr_t)kl_dict_get(%s, %s))", elemType, dictVar, keyStr)
+	}
+	return fmt.Sprintf("((%s)kl_dict_get(%s, %s))", elemType, dictVar, keyStr)
 }
 
 // --- Expression emission ---
@@ -3168,6 +3387,32 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 		obj := g.exprToC(member.Object)
 		methodName := member.Field
 
+		// Built-in Dictionary methods
+		if g.isDictExpr(member.Object) {
+			keyType := g.resolveDictKeyType(member.Object)
+			valType := g.resolveDictValueType(member.Object)
+			switch methodName {
+			case "append", "set":
+				if len(args) >= 2 {
+					return fmt.Sprintf("kl_dict_set(%s, %s, %s)", obj, g.dictPushCast(args[0], keyType), g.dictPushCast(args[1], valType))
+				}
+			case "get":
+				return g.dictGetCast(valType, obj, g.dictPushCast(argStr, keyType))
+			case "has":
+				return fmt.Sprintf("kl_dict_has(%s, %s)", obj, g.dictPushCast(argStr, keyType))
+			case "remove":
+				return fmt.Sprintf("kl_dict_remove(%s, %s)", obj, g.dictPushCast(argStr, keyType))
+			case "keys":
+				return fmt.Sprintf("kl_dict_keys(%s)", obj)
+			case "values":
+				return fmt.Sprintf("kl_dict_values(%s)", obj)
+			case "count":
+				return fmt.Sprintf("%s->count", obj)
+			case "clear":
+				return fmt.Sprintf("kl_dict_clear(%s)", obj)
+			}
+		}
+
 		// Built-in List methods
 		if g.isListExpr(member.Object) {
 			elemType := g.resolveForElemType(member.Object)
@@ -3597,6 +3842,9 @@ func (g *Generator) typeToC(t parser.TypeExpr, context string) string {
 		if ty.Name == "List" {
 			return "KlList*"
 		}
+		if ty.Name == "Dictionary" {
+			return "KlDict*"
+		}
 		return ty.Name + "*"
 	case *parser.UnionType:
 		return "void*" // placeholder — tagged unions come later
@@ -3732,7 +3980,10 @@ func (g *Generator) resolveAssignTargetType(target parser.Expr, className string
 			}
 		}
 	case *parser.IndexExpr:
-		// list[i] = val → element type
+		// dict[key] → value type, or list[i] → element type
+		if g.isDictExpr(t.Object) {
+			return g.resolveDictValueType(t.Object)
+		}
 		return g.resolveForElemType(t.Object)
 	}
 	return ""
@@ -3879,9 +4130,25 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 					return "bool"
 				}
 			}
+			// Check if it's a dictionary method call — infer return type
+			if g.isDictExpr(member.Object) {
+				switch member.Field {
+				case "keys", "values":
+					return "KlList*"
+				case "get":
+					return g.resolveDictValueType(member.Object)
+				case "count":
+					return "int"
+				case "has":
+					return "bool"
+				}
+			}
 		}
 		return "int"
 	case *parser.IndexExpr:
+		if g.isDictExpr(e.Object) {
+			return g.resolveDictValueType(e.Object)
+		}
 		return g.resolveForElemType(e.Object)
 	case *parser.LambdaExpr:
 		return "KlClosure*"

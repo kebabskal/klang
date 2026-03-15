@@ -170,6 +170,8 @@ func CTypeToKlang(cType string) string {
 		return "void"
 	case "KlList*":
 		return "List"
+	case "KlDict*":
+		return "Dictionary"
 	case "KlClosure*":
 		return "fn"
 	case "vec2":
@@ -329,8 +331,14 @@ func (d *Document) collectLocalsFromBlock(block *parser.Block, line int, locals 
 			}
 		case *parser.ForStmt:
 			if s.Pos.Line > 0 && s.Pos.Line <= line && s.VarName != "" {
-				ktype := d.inferForVarType(s.Iterable)
-				*locals = append(*locals, LocalVar{Name: s.VarName, KType: ktype, Pos: s.Pos})
+				if s.ValueVar != "" {
+					keyType, valType := d.inferForDictTypes(s.Iterable)
+					*locals = append(*locals, LocalVar{Name: s.VarName, KType: keyType, Pos: s.Pos})
+					*locals = append(*locals, LocalVar{Name: s.ValueVar, KType: valType, Pos: s.Pos})
+				} else {
+					ktype := d.inferForVarType(s.Iterable)
+					*locals = append(*locals, LocalVar{Name: s.VarName, KType: ktype, Pos: s.Pos})
+				}
 			}
 			if s.Body != nil {
 				d.collectLocalsFromBlock(s.Body, line, locals)
@@ -354,6 +362,58 @@ func (d *Document) collectLocalsFromBlock(block *parser.Block, line int, locals 
 	}
 }
 
+// inferForDictTypes resolves the key and value types for a for-loop over a Dictionary.
+func (d *Document) inferForDictTypes(iterable parser.Expr) (string, string) {
+	if iterable == nil {
+		return "", ""
+	}
+	ident, ok := iterable.(*parser.Ident)
+	if !ok {
+		return "", ""
+	}
+
+	// Check local variable type expressions in the AST
+	if d.AST != nil {
+		for _, cls := range d.AST.Classes {
+			for _, m := range cls.Methods {
+				if m.Body != nil {
+					if k, v := d.findDictTypeInBlock(ident.Name, m.Body); k != "" {
+						return k, v
+					}
+				}
+			}
+		}
+	}
+
+	// Check class fields
+	classes := d.GetClasses()
+	if classes == nil {
+		return "", ""
+	}
+	for _, cls := range classes {
+		for _, f := range cls.Fields {
+			if f.Name == ident.Name {
+				if gt, ok := f.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+					return typeExprToString(gt.TypeArgs[0]), typeExprToString(gt.TypeArgs[1])
+				}
+			}
+		}
+	}
+	return "", ""
+}
+
+// findDictTypeInBlock searches for a local VarDecl with Dictionary<K,V> type.
+func (d *Document) findDictTypeInBlock(name string, block *parser.Block) (string, string) {
+	for _, stmt := range block.Stmts {
+		if vd, ok := stmt.(*parser.VarDecl); ok && vd.Name == name {
+			if gt, ok := vd.TypeExpr.(*parser.GenericType); ok && gt.Name == "Dictionary" && len(gt.TypeArgs) >= 2 {
+				return typeExprToString(gt.TypeArgs[0]), typeExprToString(gt.TypeArgs[1])
+			}
+		}
+	}
+	return "", ""
+}
+
 // inferForVarType resolves the element type for a for-loop iterable expression.
 // e.g., for "for ball in balls" where balls:List<Ball>, returns "Ball".
 func (d *Document) inferForVarType(iterable parser.Expr) string {
@@ -361,10 +421,38 @@ func (d *Document) inferForVarType(iterable parser.Expr) string {
 		return ""
 	}
 
+	// Handle dict.keys() and dict.values() calls
+	if call, ok := iterable.(*parser.CallExpr); ok {
+		if mem, ok := call.Callee.(*parser.MemberExpr); ok {
+			if mem.Field == "keys" || mem.Field == "values" {
+				k, v := d.inferForDictTypes(mem.Object)
+				if mem.Field == "keys" && k != "" {
+					return k
+				}
+				if mem.Field == "values" && v != "" {
+					return v
+				}
+			}
+		}
+	}
+
 	// If iterable is an identifier, look up its type
 	ident, ok := iterable.(*parser.Ident)
 	if !ok {
 		return ""
+	}
+
+	// Check local variable type expressions in the AST
+	if d.AST != nil {
+		for _, cls := range d.AST.Classes {
+			for _, m := range cls.Methods {
+				if m.Body != nil {
+					if t := d.findListTypeInBlock(ident.Name, m.Body); t != "" {
+						return t
+					}
+				}
+			}
+		}
 	}
 
 	// Find the enclosing class and check fields
@@ -392,6 +480,18 @@ func (d *Document) inferForVarType(iterable parser.Expr) string {
 		}
 	}
 
+	return ""
+}
+
+// findListTypeInBlock searches for a local VarDecl with List<T> type.
+func (d *Document) findListTypeInBlock(name string, block *parser.Block) string {
+	for _, stmt := range block.Stmts {
+		if vd, ok := stmt.(*parser.VarDecl); ok && vd.Name == name {
+			if gt, ok := vd.TypeExpr.(*parser.GenericType); ok && gt.Name == "List" && len(gt.TypeArgs) > 0 {
+				return typeExprToString(gt.TypeArgs[0])
+			}
+		}
+	}
 	return ""
 }
 

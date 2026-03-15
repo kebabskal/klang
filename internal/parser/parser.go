@@ -817,16 +817,25 @@ func (p *Parser) parseFor() Stmt {
 	forPos := p.tokenPos()
 	p.advance() // skip 'for'
 	varName := ""
+	valueVar := ""
 	if p.check(lexer.TOKEN_IDENT) {
 		forPos = p.tokenPos() // position of the loop variable
 		varName = p.current().Value
 		p.advance()
+		// Check for "for key, value in dict"
+		if p.check(lexer.TOKEN_COMMA) {
+			p.advance()
+			if p.check(lexer.TOKEN_IDENT) {
+				valueVar = p.current().Value
+				p.advance()
+			}
+		}
 	}
 	p.expect(lexer.TOKEN_IN)
 	iter := p.parseExpr()
 	p.skipNewlines()
 	body := p.parseBlock()
-	return &ForStmt{VarName: varName, Iterable: iter, Body: body, Pos: forPos}
+	return &ForStmt{VarName: varName, ValueVar: valueVar, Iterable: iter, Body: body, Pos: forPos}
 }
 
 func (p *Parser) parseWhile() Stmt {
@@ -1169,6 +1178,9 @@ func (p *Parser) parseStructLit() Expr {
 	lit := &StructLit{}
 	for !p.check(lexer.TOKEN_RBRACE) && !p.isAtEnd() {
 		p.skipIndent()
+		if p.check(lexer.TOKEN_RBRACE) {
+			break
+		}
 
 		field := &StructLitField{}
 		// Check if it's named: ident = expr or ident: expr
@@ -1177,8 +1189,22 @@ func (p *Parser) parseStructLit() Expr {
 			p.advance()
 			p.advance() // skip = or :
 			field.Value = p.parseExpr()
-		} else {
+		} else if p.check(lexer.TOKEN_STRING_LIT) && p.peekIs(1, lexer.TOKEN_COLON) {
+			// Dictionary entry: "key": value
+			field.Key = &StringLit{Value: p.current().Value}
+			p.advance()
+			p.advance() // skip :
 			field.Value = p.parseExpr()
+		} else {
+			// Expression key: expr: value (for non-string dictionary keys)
+			expr := p.parseExpr()
+			if p.check(lexer.TOKEN_COLON) {
+				p.advance()
+				field.Key = expr
+				field.Value = p.parseExpr()
+			} else {
+				field.Value = expr
+			}
 		}
 		lit.Fields = append(lit.Fields, field)
 

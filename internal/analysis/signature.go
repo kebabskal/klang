@@ -145,7 +145,12 @@ func (d *Document) signatureForMember(objName, methodName string, activeParam in
 		}
 	}
 
-	return d.findMethodSignature(typeName, methodName, activeParam, classes)
+	if result := d.findMethodSignature(typeName, methodName, activeParam, classes); result != nil {
+		return result
+	}
+
+	// Check built-in type members (List, Dictionary, vec2, etc.)
+	return d.signatureForBuiltinMember(typeName, methodName, activeParam)
 }
 
 // resolveChainedType resolves a possibly dotted name like "entity.health" to its Klang type.
@@ -242,6 +247,24 @@ func (d *Document) signatureForBare(funcName string, activeParam int, line int) 
 		return buildSignatureFromDetail(sig, activeParam)
 	}
 
+	return nil
+}
+
+func (d *Document) signatureForBuiltinMember(typeName, methodName string, activeParam int) *SignatureResult {
+	lookups := []string{typeName}
+	if idx := strings.Index(typeName, "<"); idx > 0 {
+		lookups = append(lookups, typeName[:idx])
+	}
+	for _, name := range lookups {
+		if members, ok := BuiltinTypeMembers[name]; ok {
+			for _, m := range members {
+				if m.Label == methodName {
+					detail := d.expandGenericPlaceholders(typeName, m.Detail)
+					return buildSignatureFromDetail(detail, activeParam)
+				}
+			}
+		}
+	}
 	return nil
 }
 

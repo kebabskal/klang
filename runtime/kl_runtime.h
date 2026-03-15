@@ -549,6 +549,229 @@ static inline int kl_list_index_of(KlList* list, void* item) {
     return -1;
 }
 
+// ============================================================================
+// Dictionary (hash map)
+// ============================================================================
+
+#define KL_DICT_INIT_CAP 16
+
+// Slot states
+#define KL_SLOT_EMPTY   0
+#define KL_SLOT_USED    1
+#define KL_SLOT_DELETED 2
+
+typedef struct {
+    KlHeader _header;
+    void** keys;
+    void** values;
+    uint32_t* hashes;
+    uint8_t* states;
+    int count;
+    int capacity;
+    bool keys_are_strings;
+    bool keys_are_rc;
+    bool values_are_rc;
+} KlDict;
+
+static void kl_dict_destroy(KlObject* obj);
+static void kl_dict_trace(KlObject* obj, void (*visit)(KlObject*));
+
+static inline uint32_t kl_dict_hash_str(const char* s) {
+    uint32_t h = 2166136261u;
+    for (; *s; s++) {
+        h ^= (uint8_t)*s;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static inline uint32_t kl_dict_hash_ptr(void* p) {
+    uintptr_t x = (uintptr_t)p;
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = ((x >> 16) ^ x) * 0x45d9f3b;
+    x = (x >> 16) ^ x;
+    return (uint32_t)x;
+}
+
+static inline bool kl_dict_keys_equal(KlDict* d, void* a, void* b) {
+    if (d->keys_are_strings) return strcmp((const char*)a, (const char*)b) == 0;
+    return a == b;
+}
+
+static inline uint32_t kl_dict_hash_key(KlDict* d, void* key) {
+    if (d->keys_are_strings) return kl_dict_hash_str((const char*)key);
+    return kl_dict_hash_ptr(key);
+}
+
+static inline KlDict* kl_dict_new(bool keys_are_strings, bool keys_are_rc, bool values_are_rc) {
+    KlDict* d = (KlDict*)kl_alloc_rc(sizeof(KlDict), kl_dict_destroy);
+    d->capacity = KL_DICT_INIT_CAP;
+    d->keys = (void**)kl_alloc(sizeof(void*) * d->capacity);
+    d->values = (void**)kl_alloc(sizeof(void*) * d->capacity);
+    d->hashes = (uint32_t*)kl_alloc(sizeof(uint32_t) * d->capacity);
+    d->states = (uint8_t*)kl_alloc(sizeof(uint8_t) * d->capacity);
+    d->keys_are_strings = keys_are_strings;
+    d->keys_are_rc = keys_are_rc;
+    d->values_are_rc = values_are_rc;
+    if (keys_are_rc || values_are_rc) d->_header.tracer = kl_dict_trace;
+    return d;
+}
+
+static void kl_dict_trace(KlObject* obj, void (*visit)(KlObject*)) {
+    KlDict* d = (KlDict*)obj;
+    for (int i = 0; i < d->capacity; i++) {
+        if (d->states[i] != KL_SLOT_USED) continue;
+        if (d->keys_are_rc && d->keys[i]) visit((KlObject*)d->keys[i]);
+        if (d->values_are_rc && d->values[i]) visit((KlObject*)d->values[i]);
+    }
+}
+
+static void kl_dict_destroy(KlObject* obj) {
+    KlDict* d = (KlDict*)obj;
+    for (int i = 0; i < d->capacity; i++) {
+        if (d->states[i] != KL_SLOT_USED) continue;
+        if (d->keys_are_strings) free(d->keys[i]);
+        else if (d->keys_are_rc) kl_release(d->keys[i]);
+        if (d->values_are_rc) kl_release(d->values[i]);
+    }
+    free(d->keys);
+    free(d->values);
+    free(d->hashes);
+    free(d->states);
+}
+
+static void kl_dict_resize(KlDict* d) {
+    int old_cap = d->capacity;
+    void** old_keys = d->keys;
+    void** old_values = d->values;
+    uint32_t* old_hashes = d->hashes;
+    uint8_t* old_states = d->states;
+
+    d->capacity = old_cap * 2;
+    d->keys = (void**)kl_alloc(sizeof(void*) * d->capacity);
+    d->values = (void**)kl_alloc(sizeof(void*) * d->capacity);
+    d->hashes = (uint32_t*)kl_alloc(sizeof(uint32_t) * d->capacity);
+    d->states = (uint8_t*)kl_alloc(sizeof(uint8_t) * d->capacity);
+
+    for (int i = 0; i < old_cap; i++) {
+        if (old_states[i] != KL_SLOT_USED) continue;
+        uint32_t h = old_hashes[i];
+        int idx = h & (d->capacity - 1);
+        while (d->states[idx] == KL_SLOT_USED) idx = (idx + 1) & (d->capacity - 1);
+        d->keys[idx] = old_keys[i];
+        d->values[idx] = old_values[i];
+        d->hashes[idx] = h;
+        d->states[idx] = KL_SLOT_USED;
+    }
+    free(old_keys);
+    free(old_values);
+    free(old_hashes);
+    free(old_states);
+}
+
+static inline void kl_dict_set(KlDict* d, void* key, void* value) {
+    if (d->count * 4 >= d->capacity * 3) kl_dict_resize(d);
+
+    uint32_t h = kl_dict_hash_key(d, key);
+    int idx = h & (d->capacity - 1);
+    int first_deleted = -1;
+
+    while (d->states[idx] != KL_SLOT_EMPTY) {
+        if (d->states[idx] == KL_SLOT_DELETED) {
+            if (first_deleted < 0) first_deleted = idx;
+        } else if (d->hashes[idx] == h && kl_dict_keys_equal(d, d->keys[idx], key)) {
+            // Update existing entry
+            if (d->values_are_rc) { kl_retain(value); kl_release(d->values[idx]); }
+            d->values[idx] = value;
+            return;
+        }
+        idx = (idx + 1) & (d->capacity - 1);
+    }
+
+    // Insert new entry
+    if (first_deleted >= 0) idx = first_deleted;
+    if (d->keys_are_strings) d->keys[idx] = strdup((const char*)key);
+    else { d->keys[idx] = key; if (d->keys_are_rc) kl_retain(key); }
+    if (d->values_are_rc) kl_retain(value);
+    d->values[idx] = value;
+    d->hashes[idx] = h;
+    d->states[idx] = KL_SLOT_USED;
+    d->count++;
+}
+
+static inline void* kl_dict_get(KlDict* d, void* key) {
+    uint32_t h = kl_dict_hash_key(d, key);
+    int idx = h & (d->capacity - 1);
+    while (d->states[idx] != KL_SLOT_EMPTY) {
+        if (d->states[idx] == KL_SLOT_USED && d->hashes[idx] == h && kl_dict_keys_equal(d, d->keys[idx], key))
+            return d->values[idx];
+        idx = (idx + 1) & (d->capacity - 1);
+    }
+    return NULL;
+}
+
+static inline bool kl_dict_has(KlDict* d, void* key) {
+    uint32_t h = kl_dict_hash_key(d, key);
+    int idx = h & (d->capacity - 1);
+    while (d->states[idx] != KL_SLOT_EMPTY) {
+        if (d->states[idx] == KL_SLOT_USED && d->hashes[idx] == h && kl_dict_keys_equal(d, d->keys[idx], key))
+            return true;
+        idx = (idx + 1) & (d->capacity - 1);
+    }
+    return false;
+}
+
+static inline void kl_dict_remove(KlDict* d, void* key) {
+    uint32_t h = kl_dict_hash_key(d, key);
+    int idx = h & (d->capacity - 1);
+    while (d->states[idx] != KL_SLOT_EMPTY) {
+        if (d->states[idx] == KL_SLOT_USED && d->hashes[idx] == h && kl_dict_keys_equal(d, d->keys[idx], key)) {
+            if (d->keys_are_strings) free(d->keys[idx]);
+            else if (d->keys_are_rc) kl_release(d->keys[idx]);
+            if (d->values_are_rc) kl_release(d->values[idx]);
+            d->keys[idx] = NULL;
+            d->values[idx] = NULL;
+            d->states[idx] = KL_SLOT_DELETED;
+            d->count--;
+            return;
+        }
+        idx = (idx + 1) & (d->capacity - 1);
+    }
+}
+
+static inline KlList* kl_dict_keys(KlDict* d) {
+    KlList* list = kl_list_new(d->keys_are_rc);
+    for (int i = 0; i < d->capacity; i++) {
+        if (d->states[i] != KL_SLOT_USED) continue;
+        void* key = d->keys[i];
+        if (d->keys_are_strings) key = (void*)strdup((const char*)key);
+        kl_list_push(list, key);
+    }
+    return list;
+}
+
+static inline KlList* kl_dict_values(KlDict* d) {
+    KlList* list = kl_list_new(d->values_are_rc);
+    for (int i = 0; i < d->capacity; i++) {
+        if (d->states[i] != KL_SLOT_USED) continue;
+        kl_list_push(list, d->values[i]);
+    }
+    return list;
+}
+
+static inline void kl_dict_clear(KlDict* d) {
+    for (int i = 0; i < d->capacity; i++) {
+        if (d->states[i] != KL_SLOT_USED) continue;
+        if (d->keys_are_strings) free(d->keys[i]);
+        else if (d->keys_are_rc) kl_release(d->keys[i]);
+        if (d->values_are_rc) kl_release(d->values[i]);
+        d->keys[i] = NULL;
+        d->values[i] = NULL;
+        d->states[i] = KL_SLOT_EMPTY;
+    }
+    d->count = 0;
+}
+
 // IO (included after KlList is defined)
 #include "kl_io.h"
 

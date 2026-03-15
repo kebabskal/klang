@@ -186,7 +186,7 @@ var Keywords = []string{
 var BuiltinTypes = []string{
 	"int", "float", "bool", "string",
 	"vec2", "vec3", "vec4", "mat4", "quat",
-	"List", "fn",
+	"List", "Dictionary", "fn",
 	"Color", "Rectangle", "Texture2D", "Font", "Sound",
 	"Camera2D", "Camera3D",
 }
@@ -248,6 +248,17 @@ var BuiltinTypeMembers = map[string][]CompletionItem{
 		{Label: "map", Detail: "map(fn:fn(T):U):List<U>", Kind: CompletionKindMethod},
 		{Label: "find", Detail: "find(pred:fn(T):bool):T", Kind: CompletionKindMethod},
 		{Label: "find_index", Detail: "find_index(pred:fn(T):bool):int", Kind: CompletionKindMethod},
+	},
+	"Dictionary": {
+		{Label: "append", Detail: "append(key:K, value:V)", Kind: CompletionKindMethod},
+		{Label: "set", Detail: "set(key:K, value:V)", Kind: CompletionKindMethod},
+		{Label: "get", Detail: "get(key:K):V", Kind: CompletionKindMethod},
+		{Label: "has", Detail: "has(key:K):bool", Kind: CompletionKindMethod},
+		{Label: "remove", Detail: "remove(key:K)", Kind: CompletionKindMethod},
+		{Label: "keys", Detail: "keys():List<K>", Kind: CompletionKindMethod},
+		{Label: "values", Detail: "values():List<V>", Kind: CompletionKindMethod},
+		{Label: "count", Detail: "count():int", Kind: CompletionKindMethod},
+		{Label: "clear", Detail: "clear()", Kind: CompletionKindMethod},
 	},
 }
 
