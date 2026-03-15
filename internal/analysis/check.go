@@ -679,6 +679,29 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 		if valType != "" {
 			return valType
 		}
+	case *parser.BinaryExpr:
+		switch e.Op {
+		case "==", "!=", "<", ">", "<=", ">=", "and", "or":
+			return "bool"
+		}
+		leftType := d.inferExprType(e.Left, scope)
+		rightType := d.inferExprType(e.Right, scope)
+		// vec types propagate
+		for _, t := range []string{"vec2", "vec3", "vec4", "quat"} {
+			if leftType == t || rightType == t {
+				return t
+			}
+		}
+		// float promotion
+		if leftType == "float" || rightType == "float" {
+			return "float"
+		}
+		if leftType != "" {
+			return leftType
+		}
+		return rightType
+	case *parser.UnaryExpr:
+		return d.inferExprType(e.Operand, scope)
 	}
 	// Fallback to codegen
 	if d.Gen != nil {
@@ -798,6 +821,10 @@ func (d *Document) exprPos(expr parser.Expr) parser.Pos {
 		return d.exprPos(e.Callee)
 	case *parser.IndexExpr:
 		return e.Pos
+	case *parser.BinaryExpr:
+		return d.exprPos(e.Left)
+	case *parser.UnaryExpr:
+		return d.exprPos(e.Operand)
 	}
 	return parser.Pos{}
 }

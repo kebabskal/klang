@@ -4178,6 +4178,35 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 		return g.resolveForElemType(e.Object)
 	case *parser.LambdaExpr:
 		return "KlClosure*"
+	case *parser.BinaryExpr:
+		// For comparison and logical operators, result is always bool
+		switch e.Op {
+		case "==", "!=", "<", ">", "<=", ">=", "and", "or":
+			return "bool"
+		}
+		leftType := g.inferCType(e.Left)
+		rightType := g.inferCType(e.Right)
+		// If either operand is a vec/value type, the result is that type
+		for _, t := range []string{"vec2", "vec3", "vec4", "quat"} {
+			if leftType == t || rightType == t {
+				return t
+			}
+		}
+		// float promotion: if either side is float, result is float
+		if leftType == "float" || rightType == "float" {
+			return "float"
+		}
+		return leftType
+	case *parser.MemberExpr:
+		if t := g.resolveExprType(e); t != "" {
+			return t
+		}
+		return "int"
+	case *parser.Ident:
+		if t := g.resolveExprType(e); t != "" {
+			return t
+		}
+		return "int"
 	}
 	return "int"
 }
