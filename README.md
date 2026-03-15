@@ -373,7 +373,7 @@ printf("Hello from C!\n");
 
 ## Hot Reload
 
-`kl dev` watches your source files and recompiles on save. If your main class has `render()` or `update()` methods, it uses DLL hot-reloading — your program keeps running and picks up code changes instantly. Otherwise it does a full restart.
+`kl dev` watches your source files and recompiles on save. If your main class has any methods besides `main()`, it uses DLL hot-reloading — your program keeps running and picks up code changes instantly. Otherwise it does a full restart.
 
 ```sh
 kl dev main.k
