@@ -458,6 +458,15 @@ static inline void kl_list_remove(KlList* list, int index) {
     list->count--;
 }
 
+static inline void kl_list_remove_ptr(KlList* list, void* ptr) {
+    for (int i = 0; i < list->count; i++) {
+        if (list->data[i] == ptr) {
+            kl_list_remove(list, i);
+            return;
+        }
+    }
+}
+
 static inline void kl_list_insert(KlList* list, int index, void* item) {
     if (index < 0) index = 0;
     if (index > list->count) index = list->count;

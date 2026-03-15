@@ -105,6 +105,17 @@ func (d *Document) signatureForMember(objName, methodName string, activeParam in
 		}
 	}
 
+	// Check event methods
+	cls, _ := d.FindEnclosingClass(line)
+	if cls != nil {
+		if ev := d.findEventByName(cls, methodName); ev == nil {
+			// Check if objName is an event
+			if ev := d.findEventByName(cls, objName); ev != nil && methodName == "emit" {
+				return buildEventEmitSignature(ev, activeParam)
+			}
+		}
+	}
+
 	// Resolve object type
 	typeName := d.resolveIdentType(objName, line)
 	if typeName == "" && objName == "this" {
@@ -231,6 +242,26 @@ func buildSignatureFromConstructor(cls *parser.ClassDecl, activeParam int) *Sign
 
 	label := cls.Name + "(" + strings.Join(params, ", ") + ")"
 
+	return &SignatureResult{
+		Label:           label,
+		Parameters:      paramInfos,
+		ActiveParameter: activeParam,
+	}
+}
+
+func buildEventEmitSignature(ev *parser.EventDecl, activeParam int) *SignatureResult {
+	var params []string
+	var paramInfos []ParamInfo
+	for _, p := range ev.Params {
+		ktype := typeExprToString(p.TypeExpr)
+		s := p.Name
+		if ktype != "" {
+			s += ":" + ktype
+		}
+		params = append(params, s)
+		paramInfos = append(paramInfos, ParamInfo{Name: p.Name, KType: ktype})
+	}
+	label := ev.Name + ".emit(" + strings.Join(params, ", ") + ")"
 	return &SignatureResult{
 		Label:           label,
 		Parameters:      paramInfos,

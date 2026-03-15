@@ -194,6 +194,12 @@ func (d *Document) completeMemberAccess(objName string, line int) []CompletionIt
 		return items
 	}
 
+	// Check if objName is an event — complete with connect/emit/disconnect
+	if ev := d.findEventByName(cls, objName); ev != nil {
+		items = append(items, d.completeEventMembers(ev)...)
+		return items
+	}
+
 	// Check fields on current class (resolve type via codegen for accuracy)
 	for _, f := range cls.Fields {
 		if f.Name == objName {
@@ -316,6 +322,13 @@ func (d *Document) completeClassMembers(typeName string, classes map[string]*par
 			Kind:   CompletionKindProperty,
 		})
 	}
+	for _, ev := range cls.Events {
+		items = append(items, CompletionItem{
+			Label:  ev.Name,
+			Detail: "event(" + formatEventParams(ev) + ")",
+			Kind:   CompletionKindField,
+		})
+	}
 
 	// Include parent class members
 	if cls.Parent != "" {
@@ -406,6 +419,13 @@ func (d *Document) completeBare(line int) []CompletionItem {
 				Kind:   CompletionKindMethod,
 			})
 		}
+		for _, ev := range cls.Events {
+			items = append(items, CompletionItem{
+				Label:  ev.Name,
+				Detail: "event(" + formatEventParams(ev) + ")",
+				Kind:   CompletionKindField,
+			})
+		}
 
 		// Local variables (with resolved inferred types)
 		method := d.FindEnclosingMethod(cls, line)
@@ -446,6 +466,55 @@ func (d *Document) completeBare(line int) []CompletionItem {
 	}
 
 	return items
+}
+
+// formatEventParams returns a comma-separated parameter list for an event.
+func formatEventParams(ev *parser.EventDecl) string {
+	var params []string
+	for _, p := range ev.Params {
+		s := p.Name
+		if p.TypeExpr != nil {
+			s += ":" + typeExprToString(p.TypeExpr)
+		}
+		params = append(params, s)
+	}
+	return strings.Join(params, ", ")
+}
+
+// findEventByName looks up an event declaration on a class by name.
+func (d *Document) findEventByName(cls *parser.ClassDecl, name string) *parser.EventDecl {
+	if cls == nil {
+		return nil
+	}
+	for _, ev := range cls.Events {
+		if ev.Name == name {
+			return ev
+		}
+	}
+	return nil
+}
+
+// completeEventMembers returns completions for event methods.
+func (d *Document) completeEventMembers(ev *parser.EventDecl) []CompletionItem {
+	emitDetail := formatEventSignature(ev)
+	return []CompletionItem{
+		{Label: "connect", Detail: "connect(handler)", Kind: CompletionKindMethod},
+		{Label: "disconnect", Detail: "disconnect(handler)", Kind: CompletionKindMethod},
+		{Label: "emit", Detail: emitDetail, Kind: CompletionKindMethod},
+	}
+}
+
+// formatEventSignature returns a display string for an event's emit signature.
+func formatEventSignature(ev *parser.EventDecl) string {
+	var params []string
+	for _, p := range ev.Params {
+		s := p.Name
+		if p.TypeExpr != nil {
+			s += ":" + typeExprToString(p.TypeExpr)
+		}
+		params = append(params, s)
+	}
+	return "emit(" + strings.Join(params, ", ") + ")"
 }
 
 func formatMethodSignature(m *parser.MethodDecl) string {

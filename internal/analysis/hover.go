@@ -85,6 +85,14 @@ func (d *Document) hoverMember(objName, member string, line int, tok *lexer.Toke
 		}
 	}
 
+	// Check event member access
+	cls2, _ := d.FindEnclosingClass(line)
+	if cls2 != nil {
+		if ev := d.findEventByName(cls2, objName); ev != nil {
+			return d.hoverEventMember(ev, member, tok)
+		}
+	}
+
 	// Check class member access
 	classes := d.GetClasses()
 	if classes == nil {
@@ -220,6 +228,16 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 				}
 			}
 		}
+
+		// Check events on current class
+		for _, ev := range cls.Events {
+			if ev.Name == name {
+				return &HoverResult{
+					Content: "```klang\n" + name + ":event(" + formatEventParams(ev) + ")\n```\nEvent on `" + cls.Name + "`",
+					Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+				}
+			}
+		}
 	}
 
 	// Check if it's a class name
@@ -263,6 +281,28 @@ func (d *Document) hoverBare(name string, line int, tok *lexer.Token) *HoverResu
 		}
 	}
 
+	return nil
+}
+
+func (d *Document) hoverEventMember(ev *parser.EventDecl, member string, tok *lexer.Token) *HoverResult {
+	switch member {
+	case "connect":
+		return &HoverResult{
+			Content: "```klang\n" + ev.Name + ".connect(handler)\n```\nConnect a handler to this event",
+			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+		}
+	case "disconnect":
+		return &HoverResult{
+			Content: "```klang\n" + ev.Name + ".disconnect(handler)\n```\nDisconnect a handler from this event",
+			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+		}
+	case "emit":
+		sig := formatEventSignature(ev)
+		return &HoverResult{
+			Content: "```klang\n" + ev.Name + "." + sig + "\n```\nEmit this event, calling all connected handlers",
+			Line:    tok.Line, Col: tok.Col, EndCol: tok.Col + len(tok.Value),
+		}
+	}
 	return nil
 }
 

@@ -650,11 +650,9 @@ func (p *Parser) parseEnum(name string) *EnumDecl {
 
 func (p *Parser) parseEvent(name string) *EventDecl {
 	ev := &EventDecl{Name: name}
-	// event<Type>
-	if p.check(lexer.TOKEN_LT) {
-		p.advance()
-		ev.TypeExpr = p.parseTypeExpr()
-		p.expect(lexer.TOKEN_GT)
+	// event(param:type, ...) or event (no params)
+	if p.check(lexer.TOKEN_LPAREN) {
+		ev.Params = p.parseParams()
 	}
 	p.skipNewlines()
 	return ev

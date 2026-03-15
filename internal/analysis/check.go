@@ -81,6 +81,11 @@ func (d *Document) checkMethod(cls *parser.ClassDecl, className string, method *
 		scope.set(m.Name, "method")
 	}
 
+	// Class events
+	for _, ev := range cls.Events {
+		scope.set(ev.Name, "event")
+	}
+
 	// Parent class fields/methods
 	if cls.Parent != "" {
 		d.addParentScope(cls.Parent, scope)
@@ -363,6 +368,10 @@ func (d *Document) checkCallArgs(call *parser.CallExpr, scope *checkScope) {
 
 		if !typesCompatible(actualType, expectedType) {
 			pos := d.exprPos(arg)
+			if pos.Line <= 0 {
+				// Fallback: use callee position for the error
+				pos = d.exprPos(call.Callee)
+			}
 			if pos.Line > 0 {
 				d.Diags = append(d.Diags, errs.Diagnostic{
 					File:    d.URI,
@@ -406,6 +415,24 @@ func (d *Document) checkMemberExists(member *parser.MemberExpr, scope *checkScop
 
 	if typeName == "" || typeName == "method" || typeName == "func" || typeName == "class" {
 		return // can't resolve type, skip
+	}
+
+	// Event members: connect, emit, disconnect are always valid
+	if typeName == "event" {
+		switch member.Field {
+		case "connect", "emit", "disconnect":
+			return
+		}
+		d.Diags = append(d.Diags, errs.Diagnostic{
+			File:    d.URI,
+			Line:    member.Pos.Line,
+			Col:     member.Pos.Col,
+			EndCol:  member.Pos.Col + len(member.Field),
+			Kind:    errs.Error,
+			Message: fmt.Sprintf("event has no member '%s' (use connect, emit, or disconnect)", member.Field),
+			Source:  errs.GetSourceLine(d.Source, member.Pos.Line),
+		})
+		return
 	}
 
 	// Built-in value types have known fields — don't check those
@@ -474,6 +501,11 @@ func (d *Document) resolveCallParamTypes(call *parser.CallExpr, scope *checkScop
 	// Member call: obj.method(...)
 	if member, ok := call.Callee.(*parser.MemberExpr); ok {
 		if objIdent, ok := member.Object.(*parser.Ident); ok {
+			// Check if it's an event.emit() call — validate args against event params
+			if scope.typeOf(objIdent.Name) == "event" && member.Field == "emit" {
+				return d.resolveEventEmitParamTypes(objIdent.Name)
+			}
+
 			// Check if it's a module call
 			if sigs, ok := StdlibModuleSignatures[objIdent.Name]; ok {
 				for _, sig := range sigs {
@@ -816,6 +848,25 @@ func (d *Document) addWithModuleScope(module string, scope *checkScope) {
 		}
 	}
 	scope.hasWithModule = true
+}
+
+// resolveEventEmitParamTypes finds the event declaration and returns its parameter types.
+func (d *Document) resolveEventEmitParamTypes(eventName string) []string {
+	if d.AST == nil {
+		return nil
+	}
+	for _, cls := range d.AST.Classes {
+		for _, ev := range cls.Events {
+			if ev.Name == eventName {
+				types := make([]string, len(ev.Params))
+				for i, p := range ev.Params {
+					types[i] = typeExprToString(p.TypeExpr)
+				}
+				return types
+			}
+		}
+	}
+	return nil
 }
 
 // builtinIdents are identifiers that are always valid (constructors, globals, etc.)

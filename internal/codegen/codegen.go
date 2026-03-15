@@ -1361,6 +1361,11 @@ func (g *Generator) emitStructDefs(prefix string, cls *parser.ClassDecl) {
 		}
 	}
 
+	// Event handler lists
+	for _, ev := range cls.Events {
+		g.writeln("KlList* _event_%s;", ev.Name)
+	}
+
 	// In DLL mode, add function pointer fields for hot-reloadable methods
 	if g.DLLMode {
 		for _, m := range cls.Methods {
@@ -1560,6 +1565,11 @@ func (g *Generator) emitConstructor(name string, cls *parser.ClassDecl) {
 				g.writeln("%s = %s;", target, g.exprToC(field.Value))
 			}
 		}
+	}
+
+	// Initialize event handler lists
+	for _, ev := range cls.Events {
+		g.writeln("self->_event_%s = kl_list_new(false);", ev.Name)
 	}
 
 	if cls.Constructor != nil && cls.Constructor.Body != nil {
@@ -2865,6 +2875,10 @@ func (g *Generator) resolveIdent(name string) string {
 	if g.isProperty(name) {
 		return fmt.Sprintf("%s_get_%s(self)", g.currentClassName, name)
 	}
+	// Check if it's a method reference (for passing as function pointer, e.g. event.connect)
+	if g.isMethod(name) {
+		return fmt.Sprintf("%s_%s", g.currentClassName, name)
+	}
 	// Check active "with" modules for constants
 	for i := len(g.withModules) - 1; i >= 0; i-- {
 		mod := g.withModules[i]
@@ -3040,6 +3054,19 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 					}
 					return fmt.Sprintf("%s()", cFunc)
 				}
+			}
+		}
+
+		// Event methods: some_event.connect(fn), .emit(args), .disconnect(fn)
+		if ev := g.findEventDecl(member.Object); ev != nil {
+			eventField := g.resolveEventField(member.Object)
+			switch member.Field {
+			case "connect":
+				return fmt.Sprintf("kl_list_push(%s, (void*)%s)", eventField, argStr)
+			case "disconnect":
+				return fmt.Sprintf("kl_list_remove_ptr(%s, (void*)%s)", eventField, argStr)
+			case "emit":
+				return g.emitEventEmit(ev, eventField, e.Args)
 			}
 		}
 
@@ -3856,6 +3883,80 @@ func (g *Generator) write(format string, args ...interface{}) {
 		g.out.WriteString("    ")
 	}
 	g.out.WriteString(line)
+}
+
+// --- Event support ---
+
+// findEventDecl checks if an expression refers to an event field and returns its declaration.
+func (g *Generator) findEventDecl(expr parser.Expr) *parser.EventDecl {
+	ident, ok := expr.(*parser.Ident)
+	if !ok {
+		return nil
+	}
+	if g.currentClass != nil {
+		for _, ev := range g.currentClass.Events {
+			if ev.Name == ident.Name {
+				return ev
+			}
+		}
+	}
+	return nil
+}
+
+// resolveEventField returns the C expression for the event handler list.
+func (g *Generator) resolveEventField(expr parser.Expr) string {
+	ident := expr.(*parser.Ident)
+	return "self->_event_" + ident.Name
+}
+
+// isEventIdent checks if an identifier is an event on the current class.
+func (g *Generator) isEventIdent(name string) bool {
+	if g.currentClass == nil {
+		return false
+	}
+	for _, ev := range g.currentClass.Events {
+		if ev.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// eventHandlerTypedef returns the C function pointer typedef name for an event.
+func (g *Generator) eventHandlerTypedef(className string, ev *parser.EventDecl) string {
+	return fmt.Sprintf("_event_fn_%s_%s", className, ev.Name)
+}
+
+// emitEventEmit generates C code to iterate over event handlers and call each one.
+// Returns a dummy expression; the actual loop is written directly to the output.
+func (g *Generator) emitEventEmit(ev *parser.EventDecl, eventField string, callArgs []parser.Expr) string {
+	idx := fmt.Sprintf("_ei_%d", g.structLitCounter)
+	g.structLitCounter++
+
+	// Build argument list for the handler call
+	argStrs := make([]string, len(callArgs))
+	for i, arg := range callArgs {
+		argStrs[i] = g.exprToC(arg)
+	}
+
+	// Build the parameter type list for casting: (ClassName*, param types...)
+	paramTypes := []string{g.currentClassName + "*"}
+	for _, p := range ev.Params {
+		paramTypes = append(paramTypes, g.typeToC(p.TypeExpr, g.currentClassName))
+	}
+
+	// Build the function pointer type: void(*)(ClassName*, int, ...)
+	fnPtrType := fmt.Sprintf("void(*)(%s)", strings.Join(paramTypes, ", "))
+
+	// Build call args: (self, args...)
+	callArgStrs := append([]string{"self"}, argStrs...)
+
+	g.writeln("for (int %s = 0; %s < %s->count; %s++) {", idx, idx, eventField, idx)
+	g.indent++
+	g.writeln("((%s)%s->data[%s])(%s);", fnPtrType, eventField, idx, strings.Join(callArgStrs, ", "))
+	g.indent--
+	g.writeln("}")
+	return "(void)0" // dummy expression — real code emitted above
 }
 
 // --- Exported methods for LSP analysis ---

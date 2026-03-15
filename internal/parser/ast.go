@@ -100,9 +100,9 @@ type PropertyDecl struct {
 func (p *PropertyDecl) nodeTag() {}
 
 type EventDecl struct {
-	Name     string
-	TypeExpr TypeExpr // the event payload type
-	Pos      Pos
+	Name   string
+	Params []*Param // event payload parameters: event(value:int, msg:string)
+	Pos    Pos
 }
 
 func (e *EventDecl) nodeTag() {}

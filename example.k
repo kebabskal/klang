@@ -27,8 +27,8 @@ position :vec2 = vec2(10, 10)   # explicit initialization
 velocity :vec2 = {10, 10}    # inferred initialization
 cooldown := 5.0                 # inferring float type
 
-# events and inline types
-died:event<class { delta:int }>
+# events
+died:event(delta:int)
 
 # property
 is_alive:bool {
@@ -66,7 +66,7 @@ Action:class {
 	
 	# method with type options
 	act(target:Entity|vec2):Result {
-		result = {} # inferring type from return below
+		result := {} # inferring type from return below
 		result.is_success = true
 		return result
 	}	
@@ -86,7 +86,7 @@ DamageAction:Action {
 
 		else if target is vec2 { 
 			# fluent with optional chaining and default values
-			result = Scene.get_entity_at(target)
+			result := Scene.get_entity_at(target)
 				?.hurt(damage_amount, entity) 
 				?? { is_success = false }
 
