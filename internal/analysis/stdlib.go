@@ -140,35 +140,8 @@ var BuiltinTypeFieldTypes = map[string]map[string]string{
 	"quat": {"x": "float", "y": "float", "z": "float", "w": "float"},
 }
 
-// ModuleNames for completion (core only; vendors add more).
+// ModuleNames for completion (core only; vendors add more via ensureVendorsMerged).
 var ModuleNames = []string{"math", "io"}
 
-// NamespaceNames for completion (core has none; vendors add these).
+// NamespaceNames for completion (core has none; vendors add via ensureVendorsMerged).
 var NamespaceNames []string
-
-// init merges vendor-contributed data into the core tables.
-func init() {
-	for k, v := range VendorModuleSignatures() {
-		StdlibModuleSignatures[k] = append(StdlibModuleSignatures[k], v...)
-	}
-	for k, v := range VendorModuleConstantNames() {
-		StdlibModuleConstantNames[k] = append(StdlibModuleConstantNames[k], v...)
-	}
-	for k, v := range VendorNamespaces() {
-		StdlibNamespaces[k] = append(StdlibNamespaces[k], v...)
-	}
-	BuiltinTypes = append(BuiltinTypes, VendorTypes()...)
-	for k, v := range VendorTypeMembers() {
-		BuiltinTypeMembers[k] = append(BuiltinTypeMembers[k], v...)
-	}
-	for k, v := range VendorTypeFieldTypes() {
-		if BuiltinTypeFieldTypes[k] == nil {
-			BuiltinTypeFieldTypes[k] = make(map[string]string)
-		}
-		for fk, fv := range v {
-			BuiltinTypeFieldTypes[k][fk] = fv
-		}
-	}
-	ModuleNames = append(ModuleNames, VendorModuleNames()...)
-	NamespaceNames = append(NamespaceNames, VendorNamespaceNames()...)
-}

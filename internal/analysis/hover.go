@@ -34,6 +34,7 @@ func makeHover(signature, context string, tok *lexer.Token) *HoverResult {
 
 // Hover returns hover information at the given position (1-based).
 func (d *Document) Hover(line, col int) *HoverResult {
+	ensureVendorsMerged()
 	if d.AST == nil {
 		return nil
 	}

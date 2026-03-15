@@ -34,6 +34,7 @@ const (
 
 // Complete returns completion items at the given cursor position (1-based line/col).
 func (d *Document) Complete(line, col int) []CompletionItem {
+	ensureVendorsMerged()
 	if d.AST == nil {
 		return nil
 	}

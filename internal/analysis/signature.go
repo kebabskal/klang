@@ -16,6 +16,7 @@ type SignatureResult struct {
 
 // SignatureHelp returns signature information for the function/method call at the given position.
 func (d *Document) SignatureHelp(line, col int) *SignatureResult {
+	ensureVendorsMerged()
 	if d.AST == nil {
 		return nil
 	}

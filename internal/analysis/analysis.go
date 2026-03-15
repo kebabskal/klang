@@ -9,12 +9,8 @@ import (
 	"github.com/klang-lang/klang/internal/parser"
 )
 
-// vendorCTypes is populated from vendor libs at init time for fast C-type → Klang lookups.
-var vendorCTypes map[string]string
-
-func init() {
-	vendorCTypes = VendorCTypeMap()
-}
+// vendorCTypes is populated lazily by ensureVendorsMerged().
+var vendorCTypes = map[string]string{}
 
 // Document represents a single analyzed .k file.
 type Document struct {
@@ -177,6 +173,7 @@ func (d *Document) ResolveExprType(expr parser.Expr) string {
 
 // CTypeToKlang converts a C type string back to Klang display type.
 func CTypeToKlang(cType string) string {
+	ensureVendorsMerged()
 	switch cType {
 	case "int":
 		return "int"

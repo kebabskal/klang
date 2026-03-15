@@ -14,6 +14,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/klang-lang/klang/internal/analysis"
+	_ "github.com/klang-lang/klang/libs/raylib" // register raylib vendor lib
 	"github.com/klang-lang/klang/internal/codegen"
 	"github.com/klang-lang/klang/internal/errs"
 	"github.com/klang-lang/klang/internal/lexer"

@@ -14,7 +14,7 @@ editors/vscode-klang/node_modules/
 editors/vscode-klang/out/
 
 # Dependencies (vendored separately)
-raylib/
+/raylib/
 
 # OS
 *.swp

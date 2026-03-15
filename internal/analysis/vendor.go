@@ -1,5 +1,7 @@
 package analysis
 
+import "sync"
+
 // VendorLib describes a vendor library's contributions to the analysis layer.
 type VendorLib struct {
 	// Modules maps module name → function signatures (e.g. "rl" → [...]).
@@ -31,77 +33,48 @@ func RegisterVendor(v *VendorLib) {
 	vendorLibs = append(vendorLibs, v)
 }
 
-// VendorModuleSignatures returns all vendor-contributed module signatures.
-func VendorModuleSignatures() map[string][]StdlibFunc {
-	m := make(map[string][]StdlibFunc)
-	for _, v := range vendorLibs {
-		for k, funcs := range v.Modules {
-			m[k] = append(m[k], funcs...)
-		}
-	}
-	return m
-}
+// mergeVendorsOnce ensures vendor data is merged into core tables exactly once.
+var mergeVendorsOnce sync.Once
 
-// VendorModuleConstantNames returns all vendor-contributed module constants.
-func VendorModuleConstantNames() map[string][]StdlibFunc {
-	m := make(map[string][]StdlibFunc)
-	for _, v := range vendorLibs {
-		for k, consts := range v.ModuleConstants {
-			m[k] = append(m[k], consts...)
-		}
-	}
-	return m
-}
-
-// VendorNamespaces returns all vendor-contributed namespaces.
-func VendorNamespaces() map[string][]StdlibFunc {
-	m := make(map[string][]StdlibFunc)
-	for _, v := range vendorLibs {
-		for k, members := range v.Namespaces {
-			m[k] = append(m[k], members...)
-		}
-	}
-	return m
-}
-
-// VendorTypes returns all vendor-contributed type names.
-func VendorTypes() []string {
-	var types []string
-	for _, v := range vendorLibs {
-		types = append(types, v.Types...)
-	}
-	return types
-}
-
-// VendorTypeMembers returns all vendor-contributed type member completions.
-func VendorTypeMembers() map[string][]CompletionItem {
-	m := make(map[string][]CompletionItem)
-	for _, v := range vendorLibs {
-		for k, items := range v.TypeMembers {
-			m[k] = append(m[k], items...)
-		}
-	}
-	return m
-}
-
-// VendorTypeFieldTypes returns all vendor-contributed type field type mappings.
-func VendorTypeFieldTypes() map[string]map[string]string {
-	m := make(map[string]map[string]string)
-	for _, v := range vendorLibs {
-		for typeName, fields := range v.TypeFieldTypes {
-			if m[typeName] == nil {
-				m[typeName] = make(map[string]string)
+// ensureVendorsMerged merges all registered vendor data into the core stdlib
+// maps. Called lazily on first use, after all init() registrations have completed.
+func ensureVendorsMerged() {
+	mergeVendorsOnce.Do(func() {
+		for _, v := range vendorLibs {
+			for k, funcs := range v.Modules {
+				StdlibModuleSignatures[k] = append(StdlibModuleSignatures[k], funcs...)
 			}
-			for k, v := range fields {
-				m[typeName][k] = v
+			for k, consts := range v.ModuleConstants {
+				StdlibModuleConstantNames[k] = append(StdlibModuleConstantNames[k], consts...)
+			}
+			for k, members := range v.Namespaces {
+				StdlibNamespaces[k] = append(StdlibNamespaces[k], members...)
+			}
+			BuiltinTypes = append(BuiltinTypes, v.Types...)
+			for k, items := range v.TypeMembers {
+				BuiltinTypeMembers[k] = append(BuiltinTypeMembers[k], items...)
+			}
+			for typeName, fields := range v.TypeFieldTypes {
+				if BuiltinTypeFieldTypes[typeName] == nil {
+					BuiltinTypeFieldTypes[typeName] = make(map[string]string)
+				}
+				for fk, fv := range fields {
+					BuiltinTypeFieldTypes[typeName][fk] = fv
+				}
+			}
+			ModuleNames = append(ModuleNames, VendorModuleNames()...)
+			NamespaceNames = append(NamespaceNames, VendorNamespaceNames()...)
+			builtinIdents = append(builtinIdents, v.BuiltinIdents...)
+			for k, klType := range v.CTypeMap {
+				vendorCTypes[k] = klType
 			}
 		}
-	}
-	return m
+	})
 }
 
 // VendorBuiltinConstructors returns all vendor-contributed constructor signatures.
 func VendorBuiltinConstructors() map[string]string {
+	ensureVendorsMerged()
 	m := make(map[string]string)
 	for _, v := range vendorLibs {
 		for k, sig := range v.BuiltinConstructors {
@@ -113,6 +86,7 @@ func VendorBuiltinConstructors() map[string]string {
 
 // VendorBuiltinConstructorParams returns all vendor-contributed constructor param types.
 func VendorBuiltinConstructorParams() map[string][]string {
+	ensureVendorsMerged()
 	m := make(map[string][]string)
 	for _, v := range vendorLibs {
 		for k, params := range v.BuiltinConstructorParams {
@@ -120,26 +94,6 @@ func VendorBuiltinConstructorParams() map[string][]string {
 		}
 	}
 	return m
-}
-
-// VendorCTypeMap returns all vendor-contributed C type → Klang type mappings.
-func VendorCTypeMap() map[string]string {
-	m := make(map[string]string)
-	for _, v := range vendorLibs {
-		for k, klType := range v.CTypeMap {
-			m[k] = klType
-		}
-	}
-	return m
-}
-
-// VendorBuiltinIdents returns all vendor-contributed builtin identifiers.
-func VendorBuiltinIdents() []string {
-	var idents []string
-	for _, v := range vendorLibs {
-		idents = append(idents, v.BuiltinIdents...)
-	}
-	return idents
 }
 
 // VendorModuleNames returns all vendor-contributed module names.

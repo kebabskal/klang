@@ -15,6 +15,7 @@ import (
 
 	"github.com/klang-lang/klang/internal/analysis"
 	"github.com/klang-lang/klang/internal/errs"
+	_ "github.com/klang-lang/klang/libs/raylib" // register raylib vendor lib
 )
 
 // --- JSON-RPC types ---

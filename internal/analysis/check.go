@@ -41,6 +41,7 @@ func (s *checkScope) typeOf(name string) string {
 
 // Check performs semantic validation on the document and appends diagnostics.
 func (d *Document) Check() {
+	ensureVendorsMerged()
 	if d.AST == nil {
 		return
 	}
@@ -944,7 +945,7 @@ func (d *Document) resolveEventEmitParamTypes(eventName string) []string {
 }
 
 // builtinIdents are identifiers that are always valid (constructors, globals, etc.)
-// Vendor-contributed identifiers are appended in init().
+// Vendor-contributed identifiers are appended by ensureVendorsMerged().
 var builtinIdents = []string{
 	"int", "float", "string", "bool", "void",
 	"vec2", "vec3", "vec4", "mat4", "quat",
@@ -953,8 +954,4 @@ var builtinIdents = []string{
 	"true", "false", "nil", "null", "this", "self",
 	"math", "io", "os",
 	"not",
-}
-
-func init() {
-	builtinIdents = append(builtinIdents, VendorBuiltinIdents()...)
 }
