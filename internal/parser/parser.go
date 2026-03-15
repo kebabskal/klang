@@ -407,11 +407,14 @@ func (p *Parser) parseProperty(name string, typeExpr TypeExpr) *PropertyDecl {
 			// set(value) => { ... }
 			if p.check(lexer.TOKEN_LPAREN) {
 				p.advance()
-				// skip param name
 				if p.check(lexer.TOKEN_IDENT) {
+					prop.SetParam = p.current().Value
 					p.advance()
 				}
 				p.expect(lexer.TOKEN_RPAREN)
+			}
+			if prop.SetParam == "" {
+				prop.SetParam = "value"
 			}
 			p.expect(lexer.TOKEN_ARROW) // =>
 			p.skipNewlines()

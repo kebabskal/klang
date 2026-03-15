@@ -90,11 +90,12 @@ type EnumMember struct {
 }
 
 type PropertyDecl struct {
-	Name     string
-	TypeExpr TypeExpr
-	Getter   Expr   // expression for get =>
-	Setter   *Block // block for set(value) => { ... }
-	Pos      Pos
+	Name      string
+	TypeExpr  TypeExpr
+	Getter    Expr   // expression for get =>
+	Setter    *Block // block for set(value) => { ... }
+	SetParam  string // parameter name for setter (default "value")
+	Pos       Pos
 }
 
 func (p *PropertyDecl) nodeTag() {}

@@ -240,8 +240,9 @@ type Generator struct {
 	files   []*parser.File // all files (for multi-file compilation)
 	classes map[string]*parser.ClassDecl
 	// Current context for resolving identifiers
-	currentClassName string
-	currentClass     *parser.ClassDecl
+	currentClassName  string
+	currentClass      *parser.ClassDecl
+	currentReturnType string // C return type of the current method being emitted
 	localVars        map[string]string         // variable name -> C type (empty string for unknown)
 	localVarTypes    map[string]parser.TypeExpr // variable name -> original type expression
 	// Generics support
@@ -251,8 +252,9 @@ type Generator struct {
 	genericClasses         map[string]*parser.ClassDecl         // "ClassName" -> generic class template
 	genericClassInstances  map[string][]map[string]string       // "ClassName" -> list of type maps
 	// Lambda/closure support
-	lambdaCounter int
-	lambdaDefs    strings.Builder // buffer for lambda capture structs + functions
+	lambdaCounter    int
+	lambdaDefs       strings.Builder // buffer for lambda capture structs + functions
+	lambdaParamHints []string        // C types for lambda params when inferred from context (e.g. event handlers)
 	// Memory management
 	weakFields      map[string]map[string]bool // className -> set of weak field names
 	scopeVarStack   [][]scopeVar               // stack of scopes for cleanup tracking
@@ -1608,6 +1610,8 @@ func (g *Generator) emitMethod(className string, method *parser.MethodDecl) {
 	g.writeln("%s %s_%s(%s) {", retType, className, method.Name, params)
 	g.indent++
 
+	prevReturnType := g.currentReturnType
+	g.currentReturnType = retType
 	g.localVars = map[string]string{}
 	g.localVarTypes = map[string]parser.TypeExpr{}
 	g.pushScope()
@@ -1636,6 +1640,7 @@ func (g *Generator) emitMethod(className string, method *parser.MethodDecl) {
 	g.popScope()
 	g.localVars = nil
 	g.localVarTypes = nil
+	g.currentReturnType = prevReturnType
 
 	g.indent--
 	g.writeln("}")
@@ -1907,9 +1912,13 @@ func (g *Generator) emitProperty(className string, prop *parser.PropertyDecl) {
 	}
 
 	if prop.Setter != nil {
-		g.writeln("void %s_set_%s(%s* self, %s value) {", className, prop.Name, className, propType)
+		paramName := prop.SetParam
+		if paramName == "" {
+			paramName = "value"
+		}
+		g.writeln("void %s_set_%s(%s* self, %s %s) {", className, prop.Name, className, propType, paramName)
 		g.indent++
-		g.localVars = map[string]string{"value": ""}
+		g.localVars = map[string]string{paramName: ""}
 		g.localVarTypes = map[string]parser.TypeExpr{}
 		g.emitBlock(prop.Setter, className)
 		g.localVars = nil
@@ -2020,7 +2029,11 @@ func (g *Generator) emitStmt(stmt parser.Stmt, className string) {
 			g.writeln("return %s;", valStr)
 		} else {
 			g.emitScopeCleanup("")
-			g.writeln("return;")
+			if g.currentReturnType != "" && g.currentReturnType != "void" {
+				g.writeln("return NULL;")
+			} else {
+				g.writeln("return;")
+			}
 		}
 
 	case *parser.IfStmt:
@@ -2739,7 +2752,14 @@ func (g *Generator) exprToC(expr parser.Expr) string {
 		if vecResult := g.tryVecBinaryOp(e); vecResult != "" {
 			return vecResult
 		}
-		return fmt.Sprintf("(%s %s %s)", g.exprToC(e.Left), e.Op, g.exprToC(e.Right))
+		op := e.Op
+		switch op {
+		case "and":
+			op = "&&"
+		case "or":
+			op = "||"
+		}
+		return fmt.Sprintf("(%s %s %s)", g.exprToC(e.Left), op, g.exprToC(e.Right))
 	case *parser.UnaryExpr:
 		if e.Op == "not" {
 			return fmt.Sprintf("(!%s)", g.exprToC(e.Operand))
@@ -2788,6 +2808,12 @@ func (g *Generator) exprToC(expr parser.Expr) string {
 						if m.Name == e.Field {
 							// Method call without parens
 							return fmt.Sprintf("%s_%s(%s)", typeName, e.Field, obj)
+						}
+					}
+					// Check if it's a property — call the getter
+					for _, p := range cls.Properties {
+						if p.Name == e.Field {
+							return fmt.Sprintf("%s_get_%s(%s)", typeName, e.Field, obj)
 						}
 					}
 				}
@@ -2909,6 +2935,32 @@ func (g *Generator) resolveExprTypeName(expr parser.Expr) string {
 			}
 		}
 	}
+	// Chained member access: a.b → resolve type of a, then look up field b's type
+	if member, ok := expr.(*parser.MemberExpr); ok {
+		parentType := g.resolveExprTypeName(member.Object)
+		if parentType != "" {
+			if cls, ok := g.classes[parentType]; ok {
+				for _, f := range cls.Fields {
+					if f.Name == member.Field && f.TypeExpr != nil {
+						cType := g.typeToC(f.TypeExpr, parentType)
+						return strings.TrimSuffix(cType, "*")
+					}
+				}
+				// Check parent class fields
+				if cls.Parent != "" {
+					parentName := g.resolveParentName("", cls.Parent)
+					if parent, ok := g.classes[parentName]; ok {
+						for _, f := range parent.Fields {
+							if f.Name == member.Field && f.TypeExpr != nil {
+								cType := g.typeToC(f.TypeExpr, parentName)
+								return strings.TrimSuffix(cType, "*")
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	// Index access: list[i] → element type name
 	if idx, ok := expr.(*parser.IndexExpr); ok {
 		elemType := g.resolveForElemType(idx.Object)
@@ -2923,6 +2975,62 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 		switch member.Field {
 		case "sort", "sort_by", "remove_all", "filter", "map", "find", "find_index":
 			return g.emitListLambdaMethod(e, member)
+		}
+	}
+
+	// Check for event connect on sub-objects before evaluating args (lambdas need type hints)
+	if member, ok := e.Callee.(*parser.MemberExpr); ok {
+		if objTypeName := g.resolveExprTypeName(member.Object); objTypeName != "" {
+			if cls, ok := g.classes[objTypeName]; ok {
+				for _, ev := range cls.Events {
+					if ev.Name == member.Field && len(e.Args) == 1 {
+						obj := g.exprToC(member.Object)
+						eventField := fmt.Sprintf("%s->_event_%s", obj, member.Field)
+						// Set lambda param hints from event params
+						hints := make([]string, len(ev.Params))
+						for i, p := range ev.Params {
+							hints[i] = g.typeToC(p.TypeExpr, objTypeName)
+						}
+						prevHints := g.lambdaParamHints
+						g.lambdaParamHints = hints
+						handlerStr := g.exprToC(e.Args[0])
+						g.lambdaParamHints = prevHints
+						// If handler is a closure, store the fn pointer for direct function-pointer calling
+						if _, isLambda := e.Args[0].(*parser.LambdaExpr); isLambda {
+							return fmt.Sprintf("kl_list_push(%s, (void*)%s->fn)", eventField, handlerStr)
+						}
+						return fmt.Sprintf("kl_list_push(%s, (void*)%s)", eventField, handlerStr)
+					}
+				}
+			}
+		}
+	}
+
+	// Also check event connect/emit/disconnect on self (bare event ident)
+	if member, ok := e.Callee.(*parser.MemberExpr); ok {
+		if ev := g.findEventDecl(member.Object); ev != nil {
+			eventField := g.resolveEventField(member.Object)
+			switch member.Field {
+			case "connect":
+				// Set lambda param hints from event params
+				hints := make([]string, len(ev.Params))
+				for i, p := range ev.Params {
+					hints[i] = g.typeToC(p.TypeExpr, g.currentClassName)
+				}
+				prevHints := g.lambdaParamHints
+				g.lambdaParamHints = hints
+				handlerStr := g.exprToC(e.Args[0])
+				g.lambdaParamHints = prevHints
+				// Check if handler is a closure — store fn pointer for direct calling
+				if _, isLambda := e.Args[0].(*parser.LambdaExpr); isLambda {
+					return fmt.Sprintf("kl_list_push(%s, (void*)%s->fn)", eventField, handlerStr)
+				}
+				return fmt.Sprintf("kl_list_push(%s, (void*)%s)", eventField, handlerStr)
+			case "disconnect":
+				return fmt.Sprintf("kl_list_remove_ptr(%s, (void*)%s)", eventField, g.exprToC(e.Args[0]))
+			case "emit":
+				return g.emitEventEmit(ev, eventField, e.Args)
+			}
 		}
 	}
 
@@ -3054,19 +3162,6 @@ func (g *Generator) emitCall(e *parser.CallExpr) string {
 					}
 					return fmt.Sprintf("%s()", cFunc)
 				}
-			}
-		}
-
-		// Event methods: some_event.connect(fn), .emit(args), .disconnect(fn)
-		if ev := g.findEventDecl(member.Object); ev != nil {
-			eventField := g.resolveEventField(member.Object)
-			switch member.Field {
-			case "connect":
-				return fmt.Sprintf("kl_list_push(%s, (void*)%s)", eventField, argStr)
-			case "disconnect":
-				return fmt.Sprintf("kl_list_remove_ptr(%s, (void*)%s)", eventField, argStr)
-			case "emit":
-				return g.emitEventEmit(ev, eventField, e.Args)
 			}
 		}
 
@@ -3256,10 +3351,12 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 
 	// Emit lambda function into lambdaDefs buffer
 	fmt.Fprintf(&g.lambdaDefs, "%s %s(void* _cap", retType, lambdaName)
-	for _, p := range e.Params {
+	for i, p := range e.Params {
 		pType := "int"
 		if p.TypeExpr != nil {
 			pType = g.typeToC(p.TypeExpr, g.currentClassName)
+		} else if i < len(g.lambdaParamHints) && g.lambdaParamHints[i] != "" {
+			pType = g.lambdaParamHints[i]
 		}
 		fmt.Fprintf(&g.lambdaDefs, ", %s %s", pType, p.Name)
 	}
@@ -3272,14 +3369,18 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	// Save and set up a new local vars context for the lambda body
 	prevLocalVars := g.localVars
 	prevLocalVarTypes := g.localVarTypes
+	prevScopeVarStack := g.scopeVarStack
 	g.localVars = map[string]string{}
 	g.localVarTypes = map[string]parser.TypeExpr{}
+	g.scopeVarStack = nil
 
 	// Register lambda params as locals
-	for _, p := range e.Params {
+	for i, p := range e.Params {
 		pType := "int"
 		if p.TypeExpr != nil {
 			pType = g.typeToC(p.TypeExpr, g.currentClassName)
+		} else if i < len(g.lambdaParamHints) && g.lambdaParamHints[i] != "" {
+			pType = g.lambdaParamHints[i]
 		}
 		g.localVars[p.Name] = pType
 	}
@@ -3320,6 +3421,7 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	g.indent = prevIndent
 	g.localVars = prevLocalVars
 	g.localVarTypes = prevLocalVarTypes
+	g.scopeVarStack = prevScopeVarStack
 
 	fmt.Fprintf(&g.lambdaDefs, "%s", lambdaBody)
 	fmt.Fprintf(&g.lambdaDefs, "}\n\n")

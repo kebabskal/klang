@@ -61,44 +61,13 @@ func (d *Document) checkClass(prefix string, cls *parser.ClassDecl) {
 	for _, method := range cls.Methods {
 		d.checkMethod(cls, fullName, method)
 	}
+	for _, prop := range cls.Properties {
+		d.checkProperty(cls, fullName, prop)
+	}
 }
 
 func (d *Document) checkMethod(cls *parser.ClassDecl, className string, method *parser.MethodDecl) {
-	scope := newScope()
-
-	// Class fields (with types)
-	for _, f := range cls.Fields {
-		// Prefer typeExprToString to preserve generic args (e.g., "List<Ball>")
-		ktype := typeExprToString(f.TypeExpr)
-		if ktype == "" {
-			ktype = d.ResolveFieldType(f, className)
-		}
-		scope.set(f.Name, ktype)
-	}
-
-	// Class methods
-	for _, m := range cls.Methods {
-		scope.set(m.Name, "method")
-	}
-
-	// Class events
-	for _, ev := range cls.Events {
-		scope.set(ev.Name, "event")
-	}
-
-	// Parent class fields/methods
-	if cls.Parent != "" {
-		d.addParentScope(cls.Parent, scope)
-	}
-
-	// All class names (for constructor calls)
-	classes := d.GetClasses()
-	for _, c := range classes {
-		scope.set(c.Name, "class")
-	}
-
-	// Set enclosing class
-	scope.className = className
+	scope := d.buildClassScope(cls, className)
 
 	// Method parameters (with types)
 	for _, p := range method.Params {
@@ -106,14 +75,68 @@ func (d *Document) checkMethod(cls *parser.ClassDecl, className string, method *
 		scope.set(p.Name, ktype)
 	}
 
-	// Built-in identifiers
-	for _, name := range builtinIdents {
-		scope.set(name, "")
-	}
-
 	if method.Body != nil {
 		d.checkBlock(method.Body, className, scope)
 	}
+}
+
+func (d *Document) checkProperty(cls *parser.ClassDecl, className string, prop *parser.PropertyDecl) {
+	scope := d.buildClassScope(cls, className)
+
+	// Check getter expression
+	if prop.Getter != nil {
+		d.checkExpr(prop.Getter, scope)
+	}
+
+	// Check setter block (add setter parameter to scope)
+	if prop.Setter != nil {
+		setterScope := scope.copy()
+		paramName := prop.SetParam
+		if paramName == "" {
+			paramName = "value"
+		}
+		ktype := typeExprToString(prop.TypeExpr)
+		setterScope.set(paramName, ktype)
+		d.checkBlock(prop.Setter, className, setterScope)
+	}
+}
+
+// buildClassScope creates a scope with class fields, methods, events, properties, and builtins.
+func (d *Document) buildClassScope(cls *parser.ClassDecl, className string) *checkScope {
+	scope := newScope()
+
+	for _, f := range cls.Fields {
+		ktype := typeExprToString(f.TypeExpr)
+		if ktype == "" {
+			ktype = d.ResolveFieldType(f, className)
+		}
+		scope.set(f.Name, ktype)
+	}
+	for _, m := range cls.Methods {
+		scope.set(m.Name, "method")
+	}
+	for _, ev := range cls.Events {
+		scope.set(ev.Name, "event")
+	}
+	for _, prop := range cls.Properties {
+		ktype := typeExprToString(prop.TypeExpr)
+		scope.set(prop.Name, ktype)
+	}
+	if cls.Parent != "" {
+		d.addParentScope(cls.Parent, scope)
+	}
+	classes := d.GetClasses()
+	for _, c := range classes {
+		scope.set(c.Name, "class")
+	}
+	scope.className = className
+	for _, name := range builtinIdents {
+		scope.set(name, "")
+	}
+	scope.set("this", cls.Name)
+	scope.set("self", cls.Name)
+
+	return scope
 }
 
 func (d *Document) addParentScope(parentName string, scope *checkScope) {
@@ -131,6 +154,13 @@ func (d *Document) addParentScope(parentName string, scope *checkScope) {
 	}
 	for _, m := range parent.Methods {
 		scope.set(m.Name, "method")
+	}
+	for _, ev := range parent.Events {
+		scope.set(ev.Name, "event")
+	}
+	for _, prop := range parent.Properties {
+		ktype := typeExprToString(prop.TypeExpr)
+		scope.set(prop.Name, ktype)
 	}
 	if parent.Parent != "" {
 		d.addParentScope(parent.Parent, scope)
@@ -152,9 +182,8 @@ func (d *Document) checkStmt(stmt parser.Stmt, className string, scope *checkSco
 		}
 		// Infer type for the variable
 		ktype := typeExprToString(s.TypeExpr)
-		if ktype == "" && s.Value != nil && d.Gen != nil {
-			cType := d.Gen.InferCType(s.Value)
-			ktype = CTypeToKlang(cType)
+		if ktype == "" && s.Value != nil {
+			ktype = d.inferExprType(s.Value, scope)
 		}
 		scope.set(s.Name, ktype)
 
@@ -484,6 +513,16 @@ func (d *Document) classHasMember(cls *parser.ClassDecl, name string, classes ma
 			return true
 		}
 	}
+	for _, ev := range cls.Events {
+		if ev.Name == name {
+			return true
+		}
+	}
+	for _, prop := range cls.Properties {
+		if prop.Name == name {
+			return true
+		}
+	}
 	// Check parent
 	if cls.Parent != "" {
 		parent := d.findClass(cls.Parent, classes)
@@ -618,7 +657,15 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 		return "bool"
 	case *parser.Ident:
 		return scope.typeOf(e.Name)
+	case *parser.ThisExpr:
+		return scope.typeOf("this")
 	case *parser.CallExpr:
+		// Constructor call: ClassName() → type is the class name
+		if ident, ok := e.Callee.(*parser.Ident); ok {
+			if scope.typeOf(ident.Name) == "class" {
+				return ident.Name
+			}
+		}
 		// Use codegen to infer return type
 		if d.Gen != nil {
 			cType := d.Gen.InferCType(expr)
@@ -720,6 +767,12 @@ func (d *Document) resolveFieldKlangType(className, fieldName string) string {
 			}
 			// Fallback to codegen
 			return d.ResolveFieldType(f, className)
+		}
+	}
+	// Check properties
+	for _, prop := range cls.Properties {
+		if prop.Name == fieldName {
+			return typeExprToString(prop.TypeExpr)
 		}
 	}
 	// Check parent
