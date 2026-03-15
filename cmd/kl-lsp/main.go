@@ -418,30 +418,18 @@ func handleHover(msg *jsonrpcMessage) {
 
 	doc := docs[params.TextDocument.URI]
 	if doc == nil {
-		logger.Printf("hover: no doc for uri=%s (have %d docs)", params.TextDocument.URI, len(docs))
-		for k := range docs {
-			logger.Printf("  doc key: %s", k)
-		}
 		sendResponse(msg.ID, nil)
 		return
 	}
 
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
-	tok := doc.TokenAtPosition(line, col)
-	if tok != nil {
-		logger.Printf("hover: line=%d col=%d token=%q (type=%d)", line, col, tok.Value, tok.Type)
-	} else {
-		logger.Printf("hover: line=%d col=%d no token found", line, col)
-	}
 
 	result := doc.Hover(line, col)
 	if result == nil {
-		logger.Printf("hover: result=nil")
 		sendResponse(msg.ID, nil)
 		return
 	}
-	logger.Printf("hover: result=%q", result.Content)
 
 	hover := Hover{
 		Contents: MarkupContent{
