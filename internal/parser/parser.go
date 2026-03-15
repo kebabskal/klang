@@ -1224,7 +1224,9 @@ func (p *Parser) parseFnLambda() Expr {
 		for !p.check(lexer.TOKEN_RPAREN) && !p.isAtEnd() {
 			param := &Param{}
 			if p.check(lexer.TOKEN_IDENT) {
-				param.Name = p.current().Value
+				t := p.current()
+				param.Name = t.Value
+				param.Pos = Pos{Line: t.Line, Col: t.Col, EndCol: t.Col + len(t.Value)}
 				p.advance()
 			}
 			if p.check(lexer.TOKEN_COLON) {
@@ -1259,7 +1261,9 @@ func (p *Parser) tryParseLambda() Expr {
 	for !p.check(lexer.TOKEN_RPAREN) && !p.isAtEnd() {
 		param := &Param{}
 		if p.check(lexer.TOKEN_IDENT) {
-			param.Name = p.current().Value
+			t := p.current()
+			param.Name = t.Value
+			param.Pos = Pos{Line: t.Line, Col: t.Col, EndCol: t.Col + len(t.Value)}
 			p.advance()
 		} else {
 			p.pos = saved
