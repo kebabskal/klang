@@ -10,7 +10,8 @@ Performance isn't too shabby since it compiles to c.
 
 Goes without saying, but don't use this for anything serious (or anything, really). Been a fun experiment!
 
-<video src="https://github.com/kebabskal/klang/raw/master/demo-720.mov" controls width="100%"></video>
+https://github.com/user-attachments/assets/257e4155-817c-4e27-b773-9c6dfbdeb38e
+
 *examples/raylib/main.k*
 
 Check [`language_tour.k`](examples/language_tour.k) for a comprehensive tour of the language.
