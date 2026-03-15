@@ -27,18 +27,57 @@ func (d *Document) Definition(line, col int) *DefinitionResult {
 	}
 	name := tok.Value
 
-	// Check: is there a dot before this token?
+	// Check: is there a dot before this token? Walk back to collect the full chain.
 	prevTok := d.findPrevMeaningfulToken(line, col)
 
 	if prevTok != nil && (prevTok.Type == lexer.TOKEN_DOT || prevTok.Type == lexer.TOKEN_QUESTION_DOT) {
-		objTok := d.findPrevMeaningfulTokenBefore(prevTok)
-		if objTok != nil && objTok.Type == lexer.TOKEN_IDENT {
-			return d.definitionMember(objTok.Value, name, line)
+		// Collect the chain of identifiers: a.b.c.name → chain = [a, b, c]
+		var chain []string
+		dotTok := prevTok
+		for dotTok != nil && (dotTok.Type == lexer.TOKEN_DOT || dotTok.Type == lexer.TOKEN_QUESTION_DOT) {
+			identTok := d.findPrevMeaningfulTokenBefore(dotTok)
+			if identTok == nil || identTok.Type != lexer.TOKEN_IDENT {
+				break
+			}
+			chain = append([]string{identTok.Value}, chain...)
+			dotTok = d.findPrevMeaningfulTokenBefore(identTok)
+		}
+		if len(chain) > 0 {
+			return d.definitionChained(chain, name, line)
 		}
 		return nil
 	}
 
 	return d.definitionBare(name, line)
+}
+
+// definitionChained resolves go-to-definition for chained member access: a.b.c.member
+// chain contains all identifiers before the final member (e.g., [a, b, c]).
+func (d *Document) definitionChained(chain []string, member string, line int) *DefinitionResult {
+	classes := d.GetClasses()
+	if classes == nil {
+		return nil
+	}
+
+	// Resolve the type of the first identifier in the chain
+	typeName := d.resolveIdentType(chain[0], line)
+	if typeName == "" && chain[0] == "this" {
+		_, fullName := d.FindEnclosingClass(line)
+		typeName = fullName
+	}
+	if typeName == "" {
+		return nil
+	}
+
+	// Walk the rest of the chain, resolving each field's type
+	for _, fieldName := range chain[1:] {
+		typeName = d.resolveFieldKlangType(typeName, fieldName)
+		if typeName == "" {
+			return nil
+		}
+	}
+
+	return d.findMemberDefinition(typeName, member, classes)
 }
 
 func (d *Document) definitionMember(objName, member string, line int) *DefinitionResult {
@@ -84,6 +123,11 @@ func (d *Document) findMemberDefinition(typeName, member string, classes map[str
 	for _, p := range cls.Properties {
 		if p.Name == member && p.Pos.Line > 0 {
 			return &DefinitionResult{URI: uri, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
+		}
+	}
+	for _, ev := range cls.Events {
+		if ev.Name == member && ev.Pos.Line > 0 {
+			return &DefinitionResult{URI: uri, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
 		}
 	}
 
@@ -152,6 +196,20 @@ func (d *Document) definitionBare(name string, line int) *DefinitionResult {
 	for _, m := range cls.Methods {
 		if m.Name == name && m.Pos.Line > 0 {
 			return &DefinitionResult{URI: d.URI, Line: m.Pos.Line, Col: m.Pos.Col, EndCol: m.Pos.EndCol}
+		}
+	}
+
+	// Check events
+	for _, ev := range cls.Events {
+		if ev.Name == name && ev.Pos.Line > 0 {
+			return &DefinitionResult{URI: d.URI, Line: ev.Pos.Line, Col: ev.Pos.Col, EndCol: ev.Pos.EndCol}
+		}
+	}
+
+	// Check properties
+	for _, p := range cls.Properties {
+		if p.Name == name && p.Pos.Line > 0 {
+			return &DefinitionResult{URI: d.URI, Line: p.Pos.Line, Col: p.Pos.Col, EndCol: p.Pos.EndCol}
 		}
 	}
 
