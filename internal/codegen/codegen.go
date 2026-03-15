@@ -3910,6 +3910,14 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 			if _, ok := g.classes[fullName]; ok {
 				return fullName + "*"
 			}
+			// Check if it's a method call → use return type annotation
+			for clsName, cls := range g.classes {
+				for _, m := range cls.Methods {
+					if m.Name == ident.Name && m.ReturnType != nil {
+						return g.typeToC(m.ReturnType, clsName)
+					}
+				}
+			}
 		}
 		// Check if it's a module function call — infer return type
 		if member, ok := e.Callee.(*parser.MemberExpr); ok {
