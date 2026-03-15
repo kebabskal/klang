@@ -6,12 +6,11 @@ The language itself is inspired by GDScript, C# and Odin.
 
 Surprisingly it both kinda works, and is pretty smooth to develop with, due to a significant percentage (probably a majority) of the development time being spent creating an LSP and VSCode integration.
 
-performance isn't too shabby since
+Performance isn't too shabby since it compiles to c.
 
 Goes without saying, but don't use this for anything serious (or anything, really). Been a fun experiment!
 
 <video src="https://github.com/kebabskal/klang/raw/master/demo-720.mov" controls width="100%"></video>
-
 *examples/raylib/main.k*
 
 Check [`language_tour.k`](examples/language_tour.k) for a comprehensive tour of the language.
