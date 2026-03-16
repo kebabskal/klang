@@ -2581,6 +2581,8 @@ func (g *Generator) emitListLambdaMethod(e *parser.CallExpr, member *parser.Memb
 		}
 		g.indent--
 		g.writeln("}")
+		// Retain the found element so the caller owns a reference
+		g.writeln("if (%s) kl_retain(%s);", resultVar, resultVar)
 		restore()
 		return g.listGetCastDirect(elemType, resultVar)
 
