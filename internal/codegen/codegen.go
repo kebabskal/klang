@@ -558,6 +558,8 @@ func (g *Generator) scanStmtForRaylib(stmt parser.Stmt) bool {
 		if s.Value != nil {
 			return g.scanExprForRaylib(s.Value)
 		}
+	case *parser.BreakStmt, *parser.ContinueStmt:
+		// no expressions to scan
 	case *parser.Block:
 		return g.scanStmtsForRaylib(s.Stmts)
 	}
@@ -787,6 +789,8 @@ func (g *Generator) scanStmtForGenericCalls(stmt parser.Stmt, className string) 
 		}
 	case *parser.AssignStmt:
 		g.scanExprForGenericCalls(s.Value, className)
+	case *parser.BreakStmt, *parser.ContinueStmt:
+		// no expressions to scan
 	case *parser.Block:
 		g.scanBlockForGenericCalls(s, className)
 	}
@@ -1988,6 +1992,12 @@ func (g *Generator) emitStmt(stmt parser.Stmt, className string) {
 	case *parser.InlineCStmt:
 		g.writeln("%s", s.Code)
 
+	case *parser.BreakStmt:
+		g.writeln("break;")
+
+	case *parser.ContinueStmt:
+		g.writeln("continue;")
+
 	case *parser.Block:
 		g.emitBlock(s, className)
 	}
@@ -2061,6 +2071,33 @@ func (g *Generator) emitIf(s *parser.IfStmt, className string) {
 }
 
 func (g *Generator) emitFor(s *parser.ForStmt, className string) {
+	// Range iteration: for i in 3..10 or for i in 10..3 (auto-detects direction)
+	if rng, ok := s.Iterable.(*parser.RangeExpr); ok {
+		start := g.exprToC(rng.Start)
+		end := g.exprToC(rng.End)
+		if g.localVars != nil {
+			g.localVars[s.VarName] = "int"
+		}
+		startVar := fmt.Sprintf("_range_start_%s", s.VarName)
+		endVar := fmt.Sprintf("_range_end_%s", s.VarName)
+		g.writeln("{")
+		g.indent++
+		g.writeln("int %s = %s;", startVar, start)
+		g.writeln("int %s = %s;", endVar, end)
+		g.writeln("for (int %s = %s; %s <= %s ? %s < %s : %s > %s; %s <= %s ? %s++ : %s--) {",
+			s.VarName, startVar, startVar, endVar, s.VarName, endVar, s.VarName, endVar, startVar, endVar, s.VarName, s.VarName)
+		g.indent++
+		g.pushScope()
+		g.emitBlock(s.Body, className)
+		g.emitScopeCleanupCurrentOnly()
+		g.popScope()
+		g.indent--
+		g.writeln("}")
+		g.indent--
+		g.writeln("}")
+		return
+	}
+
 	// Check if iterating over a numeric range: for i in 10 → for (int i = 0; i < 10; i++)
 	if g.isNumericExpr(s.Iterable) {
 		limit := g.exprToC(s.Iterable)
@@ -3621,6 +3658,8 @@ func (g *Generator) findCapturesInStmt(stmt parser.Stmt, seen map[string]bool, c
 	case *parser.AssignStmt:
 		g.findCapturesInExpr(s.Target, seen, captures)
 		g.findCapturesInExpr(s.Value, seen, captures)
+	case *parser.BreakStmt, *parser.ContinueStmt:
+		// no expressions to scan
 	case *parser.Block:
 		g.findCapturesInBlock(s, seen, captures)
 	}

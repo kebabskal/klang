@@ -221,6 +221,36 @@ main() {
 		print("  fruit: ", fruit)
 	}
 
+	# for loop with range (start..end, exclusive)
+	print("range 3..7:")
+	for i in 3..7 {
+		print("  ", i)
+	}
+
+	# backwards for loop 
+	print("range 3..1:")
+	for i in 3..1 {
+		print("  ", i)
+	}
+
+	# break — exit a loop early
+	print("break at 3:")
+	for i in 10 {
+		if i == 3 {
+			break
+		}
+		print("  ", i)
+	}
+
+	# continue — skip to next iteration
+	print("skip odd:")
+	for i in 6 {
+		if i % 2 != 0 {
+			continue
+		}
+		print("  ", i)
+	}
+
 	# while loop
 	countdown := 3
 	while countdown > 0 {
@@ -228,6 +258,16 @@ main() {
 		countdown -= 1
 	}
 	print("  Liftoff!")
+
+	# break in while loop
+	n := 0
+	while true {
+		if n >= 3 {
+			break
+		}
+		print("  n=", n)
+		n += 1
+	}
 
 	# ----------------------------------------------------------
 	# 4. Functions

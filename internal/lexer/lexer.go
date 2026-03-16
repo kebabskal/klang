@@ -223,6 +223,11 @@ func (l *Lexer) Tokenize() []Token {
 			l.advance(2)
 			continue
 		}
+		if ch == '.' && l.peek(1) == '.' && l.peek(2) != '.' {
+			l.emit(TOKEN_DOTDOT, "..")
+			l.advance(2)
+			continue
+		}
 		if ch == '.' && l.peek(1) == '.' && l.peek(2) == '.' {
 			l.emit(TOKEN_ELLIPSIS, "...")
 			l.advance(3)

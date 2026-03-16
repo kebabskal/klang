@@ -79,8 +79,11 @@ const (
 	TOKEN_AND
 	TOKEN_OR
 	TOKEN_WHILE
+	TOKEN_BREAK
+	TOKEN_CONTINUE
 	TOKEN_FN
 	TOKEN_WITH
+	TOKEN_DOTDOT     // ..
 	TOKEN_ELLIPSIS   // ...
 	TOKEN_AT         // @
 	TOKEN_INLINE_C   // @c { raw C code }
@@ -107,6 +110,8 @@ var keywords = map[string]TokenType{
 	"and":         TOKEN_AND,
 	"or":          TOKEN_OR,
 	"while":       TOKEN_WHILE,
+	"break":       TOKEN_BREAK,
+	"continue":    TOKEN_CONTINUE,
 	"fn":          TOKEN_FN,
 	"with":        TOKEN_WITH,
 }

@@ -432,6 +432,11 @@ func (d *Document) inferForVarType(iterable parser.Expr) string {
 		return ""
 	}
 
+	// Range expression: for i in start..end → int
+	if _, ok := iterable.(*parser.RangeExpr); ok {
+		return "int"
+	}
+
 	// Handle dict.keys() and dict.values() calls
 	if call, ok := iterable.(*parser.CallExpr); ok {
 		if mem, ok := call.Callee.(*parser.MemberExpr); ok {

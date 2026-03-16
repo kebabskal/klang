@@ -689,6 +689,18 @@ func (p *Parser) parseStmt() Stmt {
 		return p.parseReturn()
 	}
 
+	// break
+	if p.check(lexer.TOKEN_BREAK) {
+		p.advance()
+		return &BreakStmt{}
+	}
+
+	// continue
+	if p.check(lexer.TOKEN_CONTINUE) {
+		p.advance()
+		return &ContinueStmt{}
+	}
+
 	// if
 	if p.check(lexer.TOKEN_IF) {
 		return p.parseIf()
@@ -833,6 +845,12 @@ func (p *Parser) parseFor() Stmt {
 	}
 	p.expect(lexer.TOKEN_IN)
 	iter := p.parseExpr()
+	// Check for range syntax: for i in start..end
+	if p.check(lexer.TOKEN_DOTDOT) {
+		p.advance()
+		end := p.parseExpr()
+		iter = &RangeExpr{Start: iter, End: end}
+	}
 	p.skipNewlines()
 	body := p.parseBlock()
 	return &ForStmt{VarName: varName, ValueVar: valueVar, Iterable: iter, Body: body, Pos: forPos}

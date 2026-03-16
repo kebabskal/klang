@@ -261,6 +261,9 @@ func (d *Document) checkStmt(stmt parser.Stmt, className string, scope *checkSco
 			d.checkBlock(s.Body, className, scope)
 		}
 
+	case *parser.BreakStmt, *parser.ContinueStmt:
+		// no expressions to check
+
 	case *parser.InlineCStmt:
 		// skip
 	}
@@ -337,6 +340,10 @@ func (d *Document) checkExpr(expr parser.Expr, scope *checkScope) {
 
 	case *parser.SpreadExpr, *parser.ThisExpr:
 		// ok
+
+	case *parser.RangeExpr:
+		d.checkExpr(e.Start, scope)
+		d.checkExpr(e.End, scope)
 
 	case *parser.IntLit, *parser.FloatLit, *parser.StringLit, *parser.BoolLit:
 		// ok

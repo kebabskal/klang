@@ -220,6 +220,16 @@ type ReturnStmt struct {
 func (r *ReturnStmt) nodeTag() {}
 func (r *ReturnStmt) stmtTag() {}
 
+type BreakStmt struct{}
+
+func (b *BreakStmt) nodeTag() {}
+func (b *BreakStmt) stmtTag() {}
+
+type ContinueStmt struct{}
+
+func (c *ContinueStmt) nodeTag() {}
+func (c *ContinueStmt) stmtTag() {}
+
 type IfStmt struct {
 	Condition Expr
 	Then      *Block
@@ -335,6 +345,14 @@ type InterpString struct {
 
 func (i *InterpString) nodeTag() {}
 func (i *InterpString) exprTag() {}
+
+type RangeExpr struct {
+	Start Expr
+	End   Expr
+}
+
+func (r *RangeExpr) nodeTag() {}
+func (r *RangeExpr) exprTag() {}
 
 type BinaryExpr struct {
 	Left  Expr

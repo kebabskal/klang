@@ -62,6 +62,7 @@ var StdlibNamespaces = map[string][]StdlibFunc{}
 // Keywords for completion.
 var Keywords = []string{
 	"if", "else", "for", "while", "return", "with",
+	"break", "continue",
 	"class", "enum", "event", "new", "fn",
 	"true", "false", "this", "not", "and", "or", "is", "in",
 }

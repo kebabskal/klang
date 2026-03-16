@@ -79,7 +79,7 @@
       "patterns": [
         {
           "name": "keyword.control.klang",
-          "match": "\\b(if|else|for|while|in|return|is|not|and|or)\\b"
+          "match": "\\b(if|else|for|while|in|return|break|continue|is|not|and|or)\\b"
         },
         {
           "name": "keyword.other.klang",
