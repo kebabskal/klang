@@ -816,6 +816,7 @@ func init() {
 				{Label: "target", Detail: "vec3", Kind: analysis.CompletionKindField},
 				{Label: "up", Detail: "vec3", Kind: analysis.CompletionKindField},
 				{Label: "fovy", Detail: "float", Kind: analysis.CompletionKindField},
+				{Label: "projection", Detail: "int", Kind: analysis.CompletionKindField},
 			},
 			"Ray": {
 				{Label: "position", Detail: "vec3", Kind: analysis.CompletionKindField},
@@ -867,7 +868,7 @@ func init() {
 			"Image": {"width": "int", "height": "int"},
 			"Texture2D": {"id": "int", "width": "int", "height": "int"},
 			"Camera2D": {"offset": "vec2", "target": "vec2", "rotation": "float", "zoom": "float"},
-			"Camera3D": {"position": "vec3", "target": "vec3", "up": "vec3", "fovy": "float"},
+			"Camera3D": {"position": "vec3", "target": "vec3", "up": "vec3", "fovy": "float", "projection": "int"},
 			"Ray": {"position": "vec3", "direction": "vec3"},
 			"RayCollision": {"hit": "bool", "distance": "float", "point": "vec3", "normal": "vec3"},
 			"BoundingBox": {"min": "vec3", "max": "vec3"},

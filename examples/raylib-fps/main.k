@@ -39,6 +39,8 @@ main() {
 	
 	set_config_flags(Flag.WindowResizable)
 	init_window(window_width, window_height, "klang fps")
+	set_exit_key(Key.Zero)
+	
 	set_target_fps(240)
 	
 	player = Player()

@@ -2263,26 +2263,30 @@ func (g *Generator) tryVecBinaryOp(e *parser.BinaryExpr) string {
 
 // inferVectorFuncReturnType returns the C type for known vector/math global functions
 func (g *Generator) inferVectorFuncReturnType(name string) string {
-	// Functions that return scalars
-	scalarFuncs := map[string]bool{
-		"vec2_dot": true, "vec3_dot": true, "vec4_dot": true,
-		"vec2_length": true, "vec3_length": true, "vec4_length": true,
-		"vec3_length_sq": true, "vec3_distance": true,
-		"quat_length": true,
-	}
-	if scalarFuncs[name] {
-		return "float"
-	}
-	// Functions that return their type prefix
-	prefixes := []struct{ prefix, typ string }{
-		{"vec2_", "vec2"}, {"vec3_", "vec3"}, {"vec4_", "vec4"},
-		{"mat4_", "mat4"}, {"quat_", "quat"},
-	}
-	for _, p := range prefixes {
-		if strings.HasPrefix(name, p.prefix) {
-			return p.typ
+	types := []string{"vec2", "vec3", "vec4", "mat4", "quat"}
+
+	// Suffix type wins — e.g. quat_rotate_vec3 → vec3
+	for _, t := range types {
+		if strings.HasSuffix(name, "_"+t) {
+			return t
 		}
 	}
+
+	// Scalar-returning operations
+	scalarOps := []string{"_dot", "_length", "_length_sq", "_distance"}
+	for _, op := range scalarOps {
+		if strings.HasSuffix(name, op) {
+			return "float"
+		}
+	}
+
+	// Default: prefix determines return type — e.g. vec3_add → vec3
+	for _, t := range types {
+		if strings.HasPrefix(name, t+"_") {
+			return t
+		}
+	}
+
 	return ""
 }
 

@@ -227,7 +227,7 @@ EXPOSED_STRUCTS = {
     "Image": {"width": "int", "height": "int"},
     "Texture": {"id": "int", "width": "int", "height": "int"},
     "Camera2D": {"offset": "vec2", "target": "vec2", "rotation": "float", "zoom": "float"},
-    "Camera3D": {"position": "vec3", "target": "vec3", "up": "vec3", "fovy": "float"},
+    "Camera3D": {"position": "vec3", "target": "vec3", "up": "vec3", "fovy": "float", "projection": "int"},
     "Ray": {"position": "vec3", "direction": "vec3"},
     "RayCollision": {"hit": "bool", "distance": "float", "point": "vec3", "normal": "vec3"},
     "BoundingBox": {"min": "vec3", "max": "vec3"},
@@ -346,7 +346,7 @@ MANUAL_FUNCTIONS = [
     },
     {
         "name": "camera3d",
-        "sig": "camera3d(position:vec3, target:vec3, up:vec3, fovy:float):Camera3D",
+        "sig": "camera3d(position:vec3, target:vec3, up:vec3, fovy:float, projection:int):Camera3D",
         "c_func": "kl_camera3d",
         "return_type": "Camera3D",
     },
