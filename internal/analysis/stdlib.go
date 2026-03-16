@@ -145,3 +145,7 @@ var ModuleNames = []string{"math", "io"}
 
 // NamespaceNames for completion (core has none; vendors add via ensureVendorsMerged).
 var NamespaceNames []string
+
+// ModuleNamespaceMap maps module name → namespace names accessible via that module.
+// e.g. "rl" → ["CameraMode", "Flag", ...] so rl.CameraMode. completions work.
+var ModuleNamespaceMap = map[string][]string{}

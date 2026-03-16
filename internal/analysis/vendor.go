@@ -24,6 +24,9 @@ type VendorLib struct {
 	CTypeMap map[string]string
 	// BuiltinIdents are additional identifiers that are always valid.
 	BuiltinIdents []string
+	// ModuleNamespaces maps module name → namespace names accessible via that module.
+	// For example, "rl" → ["CameraMode", "Flag", ...] so rl.CameraMode.Free works.
+	ModuleNamespaces map[string][]string
 }
 
 var vendorLibs []*VendorLib
@@ -67,6 +70,9 @@ func ensureVendorsMerged() {
 			builtinIdents = append(builtinIdents, v.BuiltinIdents...)
 			for k, klType := range v.CTypeMap {
 				vendorCTypes[k] = klType
+			}
+			for mod, nsNames := range v.ModuleNamespaces {
+				ModuleNamespaceMap[mod] = append(ModuleNamespaceMap[mod], nsNames...)
 			}
 		}
 	})

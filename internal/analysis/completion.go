@@ -152,6 +152,32 @@ func (d *Document) completeDot(trigger completionTrigger, line int) []Completion
 		}
 	}
 
+	// Check if a module has sub-namespaces: rl. → show CameraMode, Flag, etc.
+	if nsNames, ok := ModuleNamespaceMap[trigger.objName]; ok && len(trigger.chain) <= 1 {
+		for _, ns := range nsNames {
+			items = append(items, CompletionItem{
+				Label:  ns,
+				Detail: "enum",
+				Kind:   CompletionKindEnum,
+			})
+		}
+	}
+
+	// Check chained module.namespace: rl.CameraMode. → show enum values
+	if len(trigger.chain) == 2 {
+		nsName := trigger.chain[1]
+		if members, ok := StdlibNamespaces[nsName]; ok {
+			for _, m := range members {
+				items = append(items, CompletionItem{
+					Label:  m.Name,
+					Detail: m.Detail,
+					Kind:   CompletionKindConstant,
+				})
+			}
+			return items
+		}
+	}
+
 	// Check if objName is a variable/field whose type has members
 	if d.Gen != nil {
 		if len(trigger.chain) > 1 {

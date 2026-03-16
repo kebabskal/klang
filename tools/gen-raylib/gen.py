@@ -504,6 +504,7 @@ class RaylibGenerator:
     def process(self):
         self._process_functions()
         self._process_enums()
+        self._process_color_defines()
         self._add_manual_functions()
 
     def _process_functions(self):
@@ -604,6 +605,28 @@ class RaylibGenerator:
                 members.append((klang_name, c_name, detail))
 
             self.namespaces[ns_name] = members
+
+    def _process_color_defines(self):
+        """Extract color #define constants into the Colors namespace."""
+        # Special name mapping for colors that are single words (no underscore)
+        COLOR_NAME_MAP = {
+            "LIGHTGRAY": "LightGray",
+            "DARKGRAY": "DarkGray",
+            "DARKGREEN": "DarkGreen",
+            "SKYBLUE": "SkyBlue",
+            "DARKBLUE": "DarkBlue",
+            "DARKPURPLE": "DarkPurple",
+            "DARKBROWN": "DarkBrown",
+            "RAYWHITE": "RayWhite",
+        }
+        members = []
+        for define in self.api.get("defines", []):
+            if define.get("type") == "COLOR":
+                c_name = define["name"]
+                klang_name = COLOR_NAME_MAP.get(c_name, enum_value_to_klang(c_name, ""))
+                members.append((klang_name, c_name, "Color"))
+        if members:
+            self.namespaces["Colors"] = members
 
     def _add_manual_functions(self):
         # Add manual helper functions (avoid duplicates)
@@ -724,6 +747,14 @@ class RaylibGenerator:
         lines.append('\t\tBuiltinIdents: []string{')
         for ident in all_idents:
             lines.append(f'\t\t\t"{ident}",')
+        lines.append('\t\t},')
+
+        # ModuleNamespaces — map "rl" → all enum namespace names
+        lines.append('\t\tModuleNamespaces: map[string][]string{')
+        lines.append('\t\t\t"rl": {')
+        for ns_name in self.namespaces:
+            lines.append(f'\t\t\t\t"{ns_name}",')
+        lines.append('\t\t\t},')
         lines.append('\t\t},')
 
         lines.append('\t})')

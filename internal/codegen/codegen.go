@@ -2830,6 +2830,14 @@ func (g *Generator) exprToC(expr parser.Expr) string {
 				}
 			}
 		}
+		// Check chained module.namespace.value: rl.CameraMode.Free → CAMERA_CUSTOM
+		if inner, ok := e.Object.(*parser.MemberExpr); ok {
+			if consts, ok := stdlibConstNamespaces[inner.Field]; ok {
+				if cConst, ok := consts[e.Field]; ok {
+					return cConst
+				}
+			}
+		}
 		obj := g.exprToC(e.Object)
 		if e.Optional {
 			return fmt.Sprintf("(%s ? %s->%s : NULL)", obj, obj, e.Field)
