@@ -1,4 +1,4 @@
-.PHONY: build clean install-lsp
+.PHONY: build clean install-lsp gen-raylib
 
 ifeq ($(OS),Windows_NT)
 SHELL := C:/PROGRA~1/Git/bin/bash.exe
@@ -23,6 +23,10 @@ install-lsp: build
 	rm -rf "$$HOME/.vscode/extensions/klang"
 	ln -sfn "$(CURDIR)/editors/vscode-klang" "$$HOME/.vscode/extensions/klang"
 	@echo "Done. Restart the language server in VS Code."
+
+gen-raylib:
+	curl -sL "https://raw.githubusercontent.com/raysan5/raylib/5.5/parser/output/raylib_api.json" -o /tmp/raylib_api.json
+	python3 tools/gen-raylib/gen.py /tmp/raylib_api.json
 
 clean:
 	rm -rf build/ bin/
