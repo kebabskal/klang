@@ -686,6 +686,15 @@ func (d *Document) inferExprType(expr parser.Expr, scope *checkScope) string {
 				return ident.Name
 			}
 		}
+		// Method call on an object: obj.method() → resolve method return type
+		if member, ok := e.Callee.(*parser.MemberExpr); ok {
+			objType := d.inferExprType(member.Object, scope)
+			if objType != "" {
+				if rt := d.resolveMethodReturnType(objType, member.Field); rt != "" {
+					return rt
+				}
+			}
+		}
 		// Use codegen to infer return type
 		if d.Gen != nil {
 			cType := d.Gen.InferCType(expr)
@@ -834,6 +843,25 @@ func (d *Document) resolveFieldKlangType(className, fieldName string) string {
 	return ""
 }
 
+// resolveMethodReturnType looks up the return type of a method on a class.
+func (d *Document) resolveMethodReturnType(className, methodName string) string {
+	classes := d.GetClasses()
+	if classes == nil {
+		return ""
+	}
+	cls := d.findClass(className, classes)
+	if cls == nil {
+		return ""
+	}
+	if m := cls.FindMethod(methodName); m != nil && m.ReturnType != nil {
+		return resolveTypeWithParams(className, cls, typeExprToString(m.ReturnType))
+	}
+	if cls.Parent != "" {
+		return d.resolveMethodReturnType(cls.Parent, methodName)
+	}
+	return ""
+}
+
 // exprPos returns the position of an expression.
 func (d *Document) exprPos(expr parser.Expr) parser.Pos {
 	switch e := expr.(type) {
@@ -963,6 +991,12 @@ func (d *Document) addWithModuleScope(module string, scope *checkScope) {
 	if consts, ok := StdlibModuleConstantNames[module]; ok {
 		for _, c := range consts {
 			scope.set(c.Name, c.Detail)
+		}
+	}
+	// Add namespace names (e.g. Flag, Key) so they're recognized as valid identifiers
+	if nsNames, ok := ModuleNamespaceMap[module]; ok {
+		for _, ns := range nsNames {
+			scope.set(ns, "namespace")
 		}
 	}
 	scope.hasWithModule = true

@@ -12,6 +12,7 @@ editors/vscode-klang/out/
 
 # Dependencies (vendored separately)
 /raylib/
+.dlcache/
 
 # OS
 *.swp

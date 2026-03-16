@@ -14,6 +14,11 @@ get_point(t:float, r:float):vec2 {
 	}
 }
 
+update() {
+	window_width = rl.get_render_width()
+	window_height = rl.get_render_height()
+}
+
 render() {
 	with math
 	with rl
@@ -21,7 +26,7 @@ render() {
 	begin_drawing()
 	clear_background(color(32, 32, 32, 255))
 
-	count := 100000
+	count := 10000
 	for i in count {
 		f := float(i)
 		p := f/count
@@ -30,7 +35,7 @@ render() {
 		draw_line_v(
 			get_point(0.060 * f + time * 1.5, 500.0 + 50.0 * sin(f * 0.1 + f * 0.1)),
 			get_point((0.060 + sin(time * 0.5) * 0.0001) * f + time * 1.5, 450.0 + 50.0 * sin(f * 0.1 + f * 0.1)),
-			color(c, c, c, 20)
+			color(c, 0, c, 20)
 		)
 	}
 		
@@ -42,15 +47,17 @@ render() {
 }
 
 main() {
+	with rl
+	
+	set_config_flags(Flag.WindowResizable)
+	init_window(window_width, window_height, "klang raylib demo")
+	set_target_fps(240)
 
-	rl.init_window(window_width, window_height, "klang raylib demo")
-	rl.set_target_fps(240)
-
-	while not rl.window_should_close() {
-		time += rl.get_frame_time()
-
+	while not window_should_close() {
+		time += get_frame_time()
+		update()
 		render()
 	}
 
-	rl.close_window()
+	close_window()
 }

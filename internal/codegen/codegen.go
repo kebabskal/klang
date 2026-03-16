@@ -2292,7 +2292,7 @@ func (g *Generator) inferRlReturnType(funcName string) string {
 		return rt
 	}
 	// void by default (drawing functions etc.)
-	return "int"
+	return "void"
 }
 
 // resolveExprType returns the C type string for an expression
@@ -2329,6 +2329,11 @@ func (g *Generator) resolveExprType(expr parser.Expr) string {
 			if cType, ok := vendorTypeMap[ident.Name]; ok {
 				return cType
 			}
+			// Check if it's a class constructor → return pointer type
+			fullName := g.resolveFullClassName(ident.Name, g.currentClassName)
+			if _, ok := g.classes[fullName]; ok {
+				return fullName + "*"
+			}
 		}
 		// Check vendor module function calls for return type
 		if member, ok := call.Callee.(*parser.MemberExpr); ok {
@@ -2336,6 +2341,10 @@ func (g *Generator) resolveExprType(expr parser.Expr) string {
 				if vendorDetectModules[ident.Name] {
 					return g.inferRlReturnType(member.Field)
 				}
+			}
+			// Check method calls on class instances: obj.method()
+			if rt := g.inferMethodCallReturnType(member.Object, member.Field); rt != "" {
+				return rt
 			}
 		}
 	}
@@ -3484,12 +3493,7 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 	if len(captures) > 0 {
 		fmt.Fprintf(&g.lambdaDefs, "typedef struct {\n")
 		for _, cap := range captures {
-			cType := "int" // default
-			if g.localVars != nil {
-				if t, ok := g.localVars[cap]; ok && t != "" {
-					cType = t
-				}
-			}
+			cType := g.resolveVarType(cap)
 			fmt.Fprintf(&g.lambdaDefs, "    %s %s;\n", cType, cap)
 		}
 		fmt.Fprintf(&g.lambdaDefs, "} %s;\n\n", capsName)
@@ -3547,6 +3551,14 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 				cType = t
 			}
 		}
+		if cType == "int" && g.currentClass != nil {
+			for _, f := range g.currentClass.Fields {
+				if f.Name == cap {
+					cType = g.fieldCType(f, g.currentClassName)
+					break
+				}
+			}
+		}
 		capturedVarMap[cap] = cType
 		// Add a local var declaration that aliases captures->field
 		g.localVars[cap] = cType
@@ -3582,12 +3594,7 @@ func (g *Generator) emitLambda(e *parser.LambdaExpr) string {
 		capVar := fmt.Sprintf("_cap_%d", id)
 		g.writeln("%s* %s = (%s*)kl_alloc(sizeof(%s));", capsName, capVar, capsName, capsName)
 		for _, cap := range captures {
-			capCType := "int"
-			if g.localVars != nil {
-				if t, ok := g.localVars[cap]; ok && t != "" {
-					capCType = t
-				}
-			}
+			capCType := g.resolveVarType(cap)
 			g.writeln("%s->%s = %s;", capVar, cap, g.resolveIdent(cap))
 			if g.isRefCountedType(capCType) {
 				g.writeln("kl_retain(%s->%s);", capVar, cap)
@@ -4056,6 +4063,10 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 					return "bool"
 				}
 			}
+			// Check if it's a method call on a class instance: obj.method()
+			if rt := g.inferMethodCallReturnType(member.Object, member.Field); rt != "" {
+				return rt
+			}
 		}
 		return "int"
 	case *parser.IndexExpr:
@@ -4096,6 +4107,59 @@ func (g *Generator) inferCType(expr parser.Expr) string {
 		return "int"
 	}
 	return "int"
+}
+
+// resolveVarType resolves the C type of a variable name, checking local vars and class fields.
+// Falls back to "int" if the type can't be determined.
+func (g *Generator) resolveVarType(name string) string {
+	if g.localVars != nil {
+		if t, ok := g.localVars[name]; ok && t != "" {
+			return t
+		}
+	}
+	if g.currentClass != nil {
+		for _, f := range g.currentClass.Fields {
+			if f.Name == name {
+				return g.fieldCType(f, g.currentClassName)
+			}
+		}
+	}
+	return "int"
+}
+
+// inferMethodCallReturnType resolves the return type of a method call on an object expression.
+// Given obj.method(), it resolves the type of obj, finds the class, and returns the method's return type.
+func (g *Generator) inferMethodCallReturnType(obj parser.Expr, methodName string) string {
+	objType := g.resolveExprType(obj)
+	if objType == "" {
+		// Also try inferCType for cases like constructor calls: Player().method()
+		objType = g.inferCType(obj)
+	}
+	if objType == "" || objType == "int" {
+		return ""
+	}
+	className := strings.TrimSuffix(objType, "*")
+	// Check the class directly
+	if cls, ok := g.classes[className]; ok {
+		for _, m := range cls.Methods {
+			if m.Name == methodName && m.ReturnType != nil {
+				return g.typeToC(m.ReturnType, className)
+			}
+		}
+		// Check parent class methods
+		if cls.Parent != "" {
+			prefix := g.extractPrefix(className, cls.Name)
+			parentName := g.resolveParentName(prefix, cls.Parent)
+			if parent, ok := g.classes[parentName]; ok {
+				for _, m := range parent.Methods {
+					if m.Name == methodName && m.ReturnType != nil {
+						return g.typeToC(m.ReturnType, parentName)
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (g *Generator) constructorParams(cls *parser.ClassDecl, className string) string {

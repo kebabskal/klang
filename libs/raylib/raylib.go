@@ -218,7 +218,7 @@ func init() {
 				{"gen_mesh_knot", "gen_mesh_knot(radius:float, size:float, rad_seg:int, sides:int):Mesh"},
 				{"gen_mesh_heightmap", "gen_mesh_heightmap(heightmap:Image, size:vec3):Mesh"},
 				{"gen_mesh_cubicmap", "gen_mesh_cubicmap(cubicmap:Image, cube_size:vec3):Mesh"},
-				// Input — Keyboard
+				// Input - Keyboard
 				{"is_key_pressed", "is_key_pressed(key:int):bool"},
 				{"is_key_pressed_repeat", "is_key_pressed_repeat(key:int):bool"},
 				{"is_key_down", "is_key_down(key:int):bool"},
@@ -227,7 +227,7 @@ func init() {
 				{"get_key_pressed", "get_key_pressed():int"},
 				{"get_char_pressed", "get_char_pressed():int"},
 				{"set_exit_key", "set_exit_key(key:int)"},
-				// Input — Mouse
+				// Input - Mouse
 				{"is_mouse_button_pressed", "is_mouse_button_pressed(button:int):bool"},
 				{"is_mouse_button_down", "is_mouse_button_down(button:int):bool"},
 				{"is_mouse_button_released", "is_mouse_button_released(button:int):bool"},
@@ -241,7 +241,7 @@ func init() {
 				{"set_mouse_scale", "set_mouse_scale(scale_x:float, scale_y:float)"},
 				{"get_mouse_wheel_move", "get_mouse_wheel_move():float"},
 				{"get_mouse_wheel_move_v", "get_mouse_wheel_move_v():vec2"},
-				// Input — Gamepad
+				// Input - Gamepad
 				{"is_gamepad_available", "is_gamepad_available(gamepad:int):bool"},
 				{"get_gamepad_name", "get_gamepad_name(gamepad:int):string"},
 				{"is_gamepad_button_pressed", "is_gamepad_button_pressed(gamepad:int, button:int):bool"},
@@ -253,7 +253,7 @@ func init() {
 				{"get_gamepad_axis_movement", "get_gamepad_axis_movement(gamepad:int, axis:int):float"},
 				{"set_gamepad_mappings", "set_gamepad_mappings(mappings:string):int"},
 				{"set_gamepad_vibration", "set_gamepad_vibration(gamepad:int, left_motor:float, right_motor:float, duration:float)"},
-				// Input — Touch
+				// Input - Touch
 				{"get_touch_x", "get_touch_x():int"},
 				{"get_touch_y", "get_touch_y():int"},
 				{"get_touch_position", "get_touch_position(index:int):vec2"},
@@ -394,7 +394,7 @@ func init() {
 				{"color_rgb", "color_rgb(r:int, g:int, b:int):Color"},
 				{"rect", "rect(x:float, y:float, w:float, h:float):Rectangle"},
 				{"camera2d", "camera2d(offset:vec2, target:vec2, rotation:float, zoom:float):Camera2D"},
-				{"camera3d", "camera3d(position:vec3, target:vec3, up:vec3, fovy:float):Camera3D"},
+				{"camera3d", "camera3d(position:vec3, target:vec3, up:vec3, fovy:float, projection:int):Camera3D"},
 				{"get_screen_size", "get_screen_size():vec2"},
 			},
 		},
@@ -1182,7 +1182,7 @@ func init() {
 				"gen_mesh_knot": "GenMeshKnot",
 				"gen_mesh_heightmap": "kl_gen_mesh_heightmap",
 				"gen_mesh_cubicmap": "kl_gen_mesh_cubicmap",
-				// Input — Keyboard
+				// Input - Keyboard
 				"is_key_pressed": "IsKeyPressed",
 				"is_key_pressed_repeat": "IsKeyPressedRepeat",
 				"is_key_down": "IsKeyDown",
@@ -1191,7 +1191,7 @@ func init() {
 				"get_key_pressed": "GetKeyPressed",
 				"get_char_pressed": "GetCharPressed",
 				"set_exit_key": "SetExitKey",
-				// Input — Mouse
+				// Input - Mouse
 				"is_mouse_button_pressed": "IsMouseButtonPressed",
 				"is_mouse_button_down": "IsMouseButtonDown",
 				"is_mouse_button_released": "IsMouseButtonReleased",
@@ -1205,7 +1205,7 @@ func init() {
 				"set_mouse_scale": "SetMouseScale",
 				"get_mouse_wheel_move": "GetMouseWheelMove",
 				"get_mouse_wheel_move_v": "kl_get_mouse_wheel_move_v",
-				// Input — Gamepad
+				// Input - Gamepad
 				"is_gamepad_available": "IsGamepadAvailable",
 				"get_gamepad_name": "GetGamepadName",
 				"is_gamepad_button_pressed": "IsGamepadButtonPressed",
@@ -1217,7 +1217,7 @@ func init() {
 				"get_gamepad_axis_movement": "GetGamepadAxisMovement",
 				"set_gamepad_mappings": "SetGamepadMappings",
 				"set_gamepad_vibration": "SetGamepadVibration",
-				// Input — Touch
+				// Input - Touch
 				"get_touch_x": "GetTouchX",
 				"get_touch_y": "GetTouchY",
 				"get_touch_position": "kl_get_touch_position",
