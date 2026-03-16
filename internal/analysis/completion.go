@@ -121,6 +121,21 @@ func (d *Document) findCompletionTrigger(line, col int) completionTrigger {
 func (d *Document) completeDot(trigger completionTrigger, line int) []CompletionItem {
 	var items []CompletionItem
 
+	// Check chained module.namespace first: rl.CameraMode. → show ONLY enum values
+	if len(trigger.chain) == 2 {
+		nsName := trigger.chain[1]
+		if members, ok := StdlibNamespaces[nsName]; ok {
+			for _, m := range members {
+				items = append(items, CompletionItem{
+					Label:  m.Name,
+					Detail: m.Detail,
+					Kind:   CompletionKindConstant,
+				})
+			}
+			return items
+		}
+	}
+
 	// Check if objName is a module
 	if sigs, ok := StdlibModuleSignatures[trigger.objName]; ok {
 		for _, sig := range sigs {
@@ -160,21 +175,6 @@ func (d *Document) completeDot(trigger completionTrigger, line int) []Completion
 				Detail: "enum",
 				Kind:   CompletionKindEnum,
 			})
-		}
-	}
-
-	// Check chained module.namespace: rl.CameraMode. → show enum values
-	if len(trigger.chain) == 2 {
-		nsName := trigger.chain[1]
-		if members, ok := StdlibNamespaces[nsName]; ok {
-			for _, m := range members {
-				items = append(items, CompletionItem{
-					Label:  m.Name,
-					Detail: m.Detail,
-					Kind:   CompletionKindConstant,
-				})
-			}
-			return items
 		}
 	}
 
